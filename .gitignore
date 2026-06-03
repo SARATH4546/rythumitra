@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# NeDB database files (auto-generated on first run)
+server/db/*.db
+server/db/*.db~
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Build output
+client/dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
