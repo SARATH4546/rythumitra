@@ -400,7 +400,7 @@ On first run, the database is auto-populated with:
 
 ## License
 
-This project is built as a **Computer Science Project (CSP)** for academic purposes.
+This project is built as a **Community service project (CSP)** for academic purposes.
 
 ---
 
