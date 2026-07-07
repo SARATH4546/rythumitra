@@ -8,11 +8,17 @@ const CROPS_LIST = ['paddy','cotton','chilli','groundnut','maize','tobacco','sug
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-/** Build TwiML for WhatsApp — text only (audio via ngrok is not deliverable on free plan) */
-const twiml = (_audioUrl, ...textMessages) => {
+/** Build TwiML for WhatsApp — Body + optional audio Media in ONE <Message> */
+const twiml = (audioUrl, ...textMessages) => {
   const body = textMessages.filter(Boolean).join('\n\n');
+  if (audioUrl) {
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n<Message>\n  <Body>${esc(body)}</Body>\n  <Media>${esc(audioUrl)}</Media>\n</Message>\n</Response>`;
+  }
   return `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n<Message><Body>${esc(body)}</Body></Message>\n</Response>`;
 };
+
+/** GitHub raw CDN — free, public, no interstitial, Twilio can fetch directly */
+const GITHUB_AUDIO = 'https://raw.githubusercontent.com/SARATH4546/rythumitra/main/voice';
 
 /** Detect intent from incoming message text */
 const detect = t => {
@@ -49,11 +55,8 @@ router.post('/webhook', async (req, res) => {
     const body   = req.body.Body || '';
     const mobile = (req.body.From || '').replace('whatsapp:+','').replace('+','');
 
-    // Base URL for audio — derived from the incoming request host (= Cloudflare tunnel URL)
-    const proto   = req.headers['x-forwarded-proto'] || 'https';
-    const host    = req.headers.host || 'localhost:5000';
-    const baseUrl = `${proto}://${host}`;
-    const audio   = file => `${baseUrl}/audio/${file}.mp3`;
+    // Audio URLs — served from GitHub raw CDN (free, no interstitial, Twilio-compatible)
+    const audio = file => `${GITHUB_AUDIO}/${file}.mp3`;
 
     const intent  = detect(body);
     const farmer  = await db.farmers.findOne({ mobile });
@@ -115,9 +118,10 @@ router.post('/webhook', async (req, res) => {
         ));
       }
       return res.send(twiml(
-        audio('greeting_returning_{name}'),
+        audio('greeting_new'),
         `*Namaskaram ${farmer.name || 'Raitu'}! Welcome back*\n\n*${farmer.district}* | *${farmer.primary_crop}*\n\n"ధర" - Price\n"పథకం" - Schemes\n"వాతావరణం" - Weather\n"రుణం" - Loan\n"stop" - Unsubscribe`
       ));
+
     }
 
     // ── Mid-registration: invalid crop input ──────────────────────────
