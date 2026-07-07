@@ -8,13 +8,13 @@ const CROPS_LIST = ['paddy','cotton','chilli','groundnut','maize','tobacco','sug
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-/** Build TwiML for WhatsApp — Body + optional audio Media in ONE <Message> */
+/** Build TwiML — audio as first Message, text as second Message (WhatsApp drops Body when combined with audio Media) */
 const twiml = (audioUrl, ...textMessages) => {
   const body = textMessages.filter(Boolean).join('\n\n');
-  if (audioUrl) {
-    return `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n<Message>\n  <Body>${esc(body)}</Body>\n  <Media>${esc(audioUrl)}</Media>\n</Message>\n</Response>`;
-  }
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n<Message><Body>${esc(body)}</Body></Message>\n</Response>`;
+  const msgs = [];
+  if (audioUrl) msgs.push(`<Message><Media>${esc(audioUrl)}</Media></Message>`);
+  if (body)     msgs.push(`<Message><Body>${esc(body)}</Body></Message>`);
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n${msgs.join('\n')}\n</Response>`;
 };
 
 /** GitHub raw CDN — free, public, no interstitial, Twilio can fetch directly */
