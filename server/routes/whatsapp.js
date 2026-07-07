@@ -35,17 +35,21 @@ router.post('/message', async (req, res) => {
 
     if (intent === 'stop') {
       if (farmer) await db.farmers.update({ mobile }, { $set: { whatsapp_opted_in: false } });
-      return res.json({ session_id: session.id, intent, messages: [{ type:'text', text:'మీరు RythuMitra నుండి నమోదు రద్దు చేసుకున్నారు. మళ్ళీ చేరడానికి "Hello" పంపండి.', text_en:'You have been unsubscribed. Send "Hello" to rejoin.' }] });
+      return res.json({ session_id: session.id, intent, messages: [
+        { type:'voice_note', audio_file:'unsubscribe', audio_label:'నమోదు రద్దు నిర్ధారణ' },
+        { type:'text', text:'మీరు RythuMitra నుండి నమోదు రద్దు చేసుకున్నారు.\nMళ్ళీ చేరడానికి "Hello" పంపండి.', text_en:'You have been unsubscribed. Send "Hello" to rejoin.' }
+      ]});
     }
 
     if (intent === 'greeting') {
       if (!farmer) return res.json({ session_id: session.id, intent, is_new: true, messages: [
+        { type:'voice_note', audio_file:'greeting_new', audio_label:'రైతు మిత్ర స్వాగత సందేశం' },
         { type:'text', text:'🌾 నమస్కారం! రైతు మిత్రకు స్వాగతం!\n\nమీ జిల్లా ఎంచుకోండి:', text_en:'🌾 Welcome to RythuMitra!\n\nPlease select your district:' },
         { type:'quick_reply', options:[{label:'📍 Guntur',value:'district_Guntur'},{label:'📍 Krishna',value:'district_Krishna'},{label:'📍 Kurnool',value:'district_Kurnool'},{label:'📍 East Godavari',value:'district_East Godavari'},{label:'📍 West Godavari',value:'district_West Godavari'}] }
       ]});
       return res.json({ session_id: session.id, intent, messages: [
         { type:'text', text:`🌾 నమస్కారం ${farmer.name || 'రైతు'}!\n\nనేను మీకు ఏమి సహాయం చేయగలను?`, text_en:`🌾 Welcome back ${farmer.name || 'Farmer'}! How can I help?` },
-        { type:'voice_note', audio_label:`Welcome message for ${farmer.name || 'farmer'} in ${farmer.district}` },
+        { type:'voice_note', audio_file:'greeting_returning_{name}', audio_label:`నమస్కారం ${farmer.name || 'రైతు'}! Welcome back` },
         { type:'quick_reply', options:[{label:'📈 ధర (Price)',value:'price'},{label:'📋 పథకాలు (Schemes)',value:'scheme'},{label:'🌦️ వాతావరణం (Weather)',value:'weather'},{label:'💳 రుణం (Loan)',value:'loan'}] }
       ]});
     }
@@ -57,7 +61,7 @@ router.post('/message', async (req, res) => {
       const price = allP.sort((a, b) => b.date.localeCompare(a.date))[0];
       const hist  = (await db.history.find({ crop, district: dist })).sort((a, b) => a.date.localeCompare(b.date)).slice(-7);
       return res.json({ session_id: session.id, intent, messages: [
-        { type:'voice_note', audio_label: price ? `${dist} మండిలో నేటి ${crop} ధర ₹${price.price_modal} రూపాయలు క్వింటాలుకు` : `${crop} ధర అందుబాటులో లేదు` },
+        { type:'voice_note', audio_file: price ? 'price_normal' : 'price_not_available', audio_label: price ? `${dist} మండిలో నేటి ${crop} ధర - ${price?.price_modal} రూపాయలు` : `${crop} ధర అందుబాటులో లేదు` },
         price ? { type:'price_card', data:{ crop:price.crop, district:price.district, modal:price.price_modal, min:price.price_min, max:price.price_max, unit:price.unit, date:price.date, source:price.source } }
               : { type:'text', text:`Sorry, no price data for ${crop} in ${dist} today.`, text_en:'' },
         hist.length > 1 ? { type:'price_chart', data:hist, crop, district:dist } : null,
@@ -68,6 +72,7 @@ router.post('/message', async (req, res) => {
     if (intent === 'scheme') {
       const schemes = await db.schemes.find({ is_active: true });
       return res.json({ session_id: session.id, intent, messages: [
+        { type:'voice_note', audio_file:'schemes_intro', audio_label:'ప్రభుత్వ పథకాల సమాచారం' },
         { type:'text', text:'📋 మీకు అర్హమైన ప్రభుత్వ పథకాలు:', text_en:'📋 Government schemes you may be eligible for:' },
         ...schemes.map(s => ({ type:'scheme_card', data:{ id:s.id, name:s.name, name_telugu:s.name_telugu, benefit:s.benefit, amount:s.benefit_amount, deadline:s.deadline, apply:s.how_to_apply } })),
         { type:'quick_reply', options:[{label:'📈 ధర',value:'price'},{label:'🌦️ వాతావరణం',value:'weather'},{label:'🏠 Menu',value:'menu'}] }
@@ -77,7 +82,7 @@ router.post('/message', async (req, res) => {
     if (intent === 'weather') {
       const dist = farmer?.district || 'Guntur';
       return res.json({ session_id: session.id, intent, messages: [
-        { type:'voice_note', audio_label:`${dist} జిల్లా వాతావరణ సూచన: రేపు భారీ వర్షం అంచనా.` },
+        { type:'voice_note', audio_file:'weather_rain_warning', audio_label:`${dist} జిల్లా వాతావరణ సూచన - రేపు భారీ వర్షం అంచనా` },
         { type:'weather_card', district:dist, forecast:[
           { day:'Today',     icon:'⛅', condition:'Partly Cloudy', temp:'34°C', rain:'20%' },
           { day:'Tomorrow',  icon:'🌧️', condition:'Heavy Rain',    temp:'28°C', rain:'80%' },
@@ -90,7 +95,7 @@ router.post('/message', async (req, res) => {
 
     if (intent === 'loan') {
       return res.json({ session_id: session.id, intent, messages: [
-        { type:'voice_note', audio_label:'కిసాన్ క్రెడిట్ కార్డు మరియు నాబార్డ్ రుణ సమాచారం' },
+        { type:'voice_note', audio_file:'loan_kcc', audio_label:'కిసాన్ క్రెడిట్ కార్డు మరియు నాబార్డ్ రుణ సమాచారం' },
         { type:'loan_card', data:[
           { name:'Kisan Credit Card (KCC)', interest:'4%', limit:'₹3,00,000', docs:'Land record, Aadhaar, Passport photo', contact:'Nearest nationalized bank' },
           { name:'NABARD Microfinance',     interest:'7%', limit:'₹5,00,000 (SHG)', docs:'SHG membership, Aadhaar', contact:'1800-200-0104' }

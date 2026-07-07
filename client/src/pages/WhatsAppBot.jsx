@@ -82,125 +82,152 @@ export default function WhatsAppBot() {
   const clearChat = () => { setMessages([]); setSessionId(null); setRegStep(null) }
 
   const renderMessage = (msg, i) => {
-    switch (msg.type) {
-      case 'text':
-        return (
-          <div key={i}>
-            <div className="telugu" style={{ fontSize: 13, lineHeight: 1.6 }}>{msg.text}</div>
-            {msg.text_en && msg.text_en !== msg.text && (
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>{msg.text_en}</div>
-            )}
-          </div>
-        )
-      case 'voice_note':
-        return (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(34,197,94,0.1)', borderRadius: 8, padding: '8px 12px' }}>
-            <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--green-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    if (msg.type === 'text') {
+      return (
+        <div key={i}>
+          <div className="telugu" style={{ fontSize: 13, lineHeight: 1.6 }}>{msg.text}</div>
+          {msg.text_en && msg.text_en !== msg.text && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>{msg.text_en}</div>
+          )}
+        </div>
+      )
+    }
+
+    if (msg.type === 'voice_note') {
+      const audioFile = msg.audio_file || 'greeting_new'
+      const audioUrl  = `/audio/${audioFile}.mp3`
+      return (
+        <div key={i} style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: 10, padding: '10px 12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--green-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <Mic size={14} color="#000" />
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ display: 'flex', gap: 2 }}>
-                {Array.from({ length: 20 }, (_, j) => (
-                  <div key={j} style={{ width: 2, height: `${8 + Math.sin(j * 1.2) * 6}px`, background: 'var(--green-primary)', borderRadius: 1, opacity: 0.7 }} />
+              <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', height: 20 }}>
+                {Array.from({ length: 24 }, (_, j) => (
+                  <div key={j} style={{ width: 2, height: `${6 + Math.abs(Math.sin(j * 0.8) * 10)}px`, background: 'var(--green-primary)', borderRadius: 1, opacity: 0.75 }} />
                 ))}
               </div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>🎵 Voice Note · Telugu</div>
-            </div>
-            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>▶</span>
-          </div>
-        )
-      case 'price_card':
-        const pd = msg.data
-        return pd ? (
-          <div key={i} style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.15), rgba(240,165,0,0.1))', border: '1px solid rgba(34,197,94,0.25)', borderRadius: 10, padding: '12px 14px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <span style={{ fontSize: 20 }}>🌾</span>
-              <div>
-                <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: 14 }}>{pd.crop}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>📍 {pd.district} Mandi · {pd.date}</div>
-              </div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, textAlign: 'center' }}>
-              {[['Min', pd.min, '#94a3b8'], ['Modal', pd.modal, '#22c55e'], ['Max', pd.max, '#f0a500']].map(([label, val, color]) => (
-                <div key={label} style={{ background: 'var(--bg-primary)', borderRadius: 6, padding: '6px 4px' }}>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{label}</div>
-                  <div style={{ fontSize: 14, fontWeight: 800, color }}>{val ? `₹${Number(val).toLocaleString('en-IN')}` : '—'}</div>
-                  <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>/{pd.unit}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, textAlign: 'right' }}>Source: {pd.source}</div>
-          </div>
-        ) : null
-      case 'scheme_card':
-        const sd = msg.data
-        return (
-          <div key={i} style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 10, padding: '10px 12px', marginBottom: 4 }}>
-            <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)', marginBottom: 2 }}>📋 {sd.name}</div>
-            {sd.name_telugu && <div className="telugu" style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{sd.name_telugu}</div>}
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{sd.benefit}</div>
-            {sd.amount && <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--gold)', marginTop: 4 }}>{sd.amount}</div>}
-            {sd.deadline && <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 2 }}>⏰ Deadline: {sd.deadline}</div>}
-          </div>
-        )
-      case 'weather_card':
-        return (
-          <div key={i} style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 10, padding: '10px 12px' }}>
-            <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 8 }}>🌦️ {msg.district} Weather Forecast</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {msg.forecast?.map((f, fi) => (
-                <div key={fi} style={{ flex: 1, textAlign: 'center', background: 'var(--bg-primary)', borderRadius: 8, padding: '8px 4px' }}>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{f.day}</div>
-                  <div style={{ fontSize: 20, margin: '4px 0' }}>{f.icon}</div>
-                  <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 2 }}>{f.condition}</div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>{f.temp}</div>
-                  <div style={{ fontSize: 10, color: '#3b82f6' }}>💧 {f.rain}</div>
-                </div>
-              ))}
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>Telugu Voice Note</div>
             </div>
           </div>
-        )
-      case 'loan_card':
-        return (
-          <div key={i}>
-            {msg.data?.map((loan, li) => (
-              <div key={li} style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)', borderRadius: 10, padding: '10px 12px', marginBottom: 6 }}>
-                <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)', marginBottom: 4 }}>💳 {loan.name}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <span>📊 Interest: <strong style={{ color: 'var(--green-primary)' }}>{loan.interest}</strong></span>
-                  <span>💰 Limit: <strong style={{ color: 'var(--gold)' }}>{loan.limit}</strong></span>
-                  <span>📞 Contact: {loan.contact}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )
-      case 'quick_reply':
-        return (
-          <div key={i} className="sim-quick-replies">
-            {msg.options?.map((opt, oi) => (
-              <button key={oi} className="sim-qr-btn" onClick={() => handleQR(opt.value)}>{opt.label}</button>
-            ))}
-          </div>
-        )
-      case 'price_chart':
-        return (
-          <div key={i} style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: '8px 12px' }}>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>7-Day Price Trend</div>
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 36 }}>
-              {msg.data?.map((d, di) => {
-                const prices = msg.data.map(x => x.price_modal)
-                const maxP = Math.max(...prices), minP = Math.min(...prices)
-                const h = maxP === minP ? 18 : Math.round(((d.price_modal - minP) / (maxP - minP)) * 28) + 8
-                return <div key={di} style={{ flex: 1, height: h, background: 'var(--green-primary)', borderRadius: '2px 2px 0 0', opacity: 0.7 + (di / msg.data.length) * 0.3 }} title={`₹${d.price_modal}`} />
-              })}
-            </div>
-          </div>
-        )
-      default:
-        return null
+          <audio
+            controls
+            src={audioUrl}
+            style={{ width: '100%', height: 32, borderRadius: 8, outline: 'none', accentColor: '#22c55e' }}
+            onError={e => e.target.style.display='none'}
+          />
+          {msg.audio_label && (
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>{msg.audio_label}</div>
+          )}
+        </div>
+      )
     }
+
+    if (msg.type === 'price_card') {
+      const pd = msg.data
+      return pd ? (
+        <div key={i} style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.15), rgba(240,165,0,0.1))', border: '1px solid rgba(34,197,94,0.25)', borderRadius: 10, padding: '12px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 20 }}>🌾</span>
+            <div>
+              <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: 14 }}>{pd.crop}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>📍 {pd.district} Mandi · {pd.date}</div>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, textAlign: 'center' }}>
+            {[['Min', pd.min, '#94a3b8'], ['Modal', pd.modal, '#22c55e'], ['Max', pd.max, '#f0a500']].map(([label, val, color]) => (
+              <div key={label} style={{ background: 'var(--bg-primary)', borderRadius: 6, padding: '6px 4px' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{label}</div>
+                <div style={{ fontSize: 14, fontWeight: 800, color }}>{val ? `₹${Number(val).toLocaleString('en-IN')}` : '—'}</div>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>/{pd.unit}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, textAlign: 'right' }}>Source: {pd.source}</div>
+        </div>
+      ) : null
+    }
+
+    if (msg.type === 'scheme_card') {
+      const sd = msg.data
+      return (
+        <div key={i} style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 10, padding: '10px 12px', marginBottom: 4 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)', marginBottom: 2 }}>📋 {sd.name}</div>
+          {sd.name_telugu && <div className="telugu" style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{sd.name_telugu}</div>}
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{sd.benefit}</div>
+          {sd.amount && <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--gold)', marginTop: 4 }}>{sd.amount}</div>}
+          {sd.deadline && <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 2 }}>⏰ Deadline: {sd.deadline}</div>}
+        </div>
+      )
+    }
+
+    if (msg.type === 'weather_card') {
+      return (
+        <div key={i} style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 10, padding: '10px 12px' }}>
+          <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 8 }}>🌦️ {msg.district} Weather Forecast</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {msg.forecast?.map((f, fi) => (
+              <div key={fi} style={{ flex: 1, textAlign: 'center', background: 'var(--bg-primary)', borderRadius: 8, padding: '8px 4px' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{f.day}</div>
+                <div style={{ fontSize: 20, margin: '4px 0' }}>{f.icon}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 2 }}>{f.condition}</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>{f.temp}</div>
+                <div style={{ fontSize: 10, color: '#3b82f6' }}>💧 {f.rain}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )
+    }
+
+    if (msg.type === 'loan_card') {
+      return (
+        <div key={i}>
+          {msg.data?.map((loan, li) => (
+            <div key={li} style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)', borderRadius: 10, padding: '10px 12px', marginBottom: 6 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)', marginBottom: 4 }}>💳 {loan.name}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span>📊 Interest: <strong style={{ color: 'var(--green-primary)' }}>{loan.interest}</strong></span>
+                <span>💰 Limit: <strong style={{ color: 'var(--gold)' }}>{loan.limit}</strong></span>
+                <span>📞 Contact: {loan.contact}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )
+    }
+
+    if (msg.type === 'quick_reply') {
+      return (
+        <div key={i} className="sim-quick-replies">
+          {msg.options?.map((opt, oi) => (
+            <button key={oi} className="sim-qr-btn" onClick={() => handleQR(opt.value)}>{opt.label}</button>
+          ))}
+        </div>
+      )
+    }
+
+    if (msg.type === 'price_chart') {
+      return (
+        <div key={i} style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: '8px 12px' }}>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>7-Day Price Trend</div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 36 }}>
+            {msg.data?.map((d, di) => {
+              const prices = msg.data.map(x => x.price_modal)
+              const maxP = Math.max(...prices), minP = Math.min(...prices)
+              const h = maxP === minP ? 18 : Math.round(((d.price_modal - minP) / (maxP - minP)) * 28) + 8
+              return <div key={di} style={{ flex: 1, height: h, background: 'var(--green-primary)', borderRadius: '2px 2px 0 0', opacity: 0.7 + (di / msg.data.length) * 0.3 }} title={`₹${d.price_modal}`} />
+            })}
+          </div>
+        </div>
+      )
+    }
+
+    return null
   }
+
+
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 24 }}>

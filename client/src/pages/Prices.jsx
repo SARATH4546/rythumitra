@@ -39,8 +39,13 @@ export default function Prices() {
     if (!form.crop || !form.district || !form.price_modal) return toast('Fill required fields', 'error')
     setSaving(true)
     try {
-      await axios.post('/api/prices', form)
-      toast(modal === 'add' ? 'Price added' : 'Price updated')
+      if (modal === 'add') {
+        await axios.post('/api/prices', form)
+        toast('Price added')
+      } else {
+        await axios.put(`/api/prices/${modal.id}`, form)
+        toast('Price updated')
+      }
       closeModal(); load()
     } catch (e) { toast(e.response?.data?.error || 'Error', 'error') }
     finally { setSaving(false) }

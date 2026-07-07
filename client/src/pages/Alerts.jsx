@@ -25,6 +25,7 @@ export default function Alerts() {
   const [estimate, setEst]    = useState(null)
   const [saving, setSaving]   = useState(false)
   const [sending, setSending] = useState(null)
+  const [statusFilter, setStatusFilter] = useState('all')
 
   const load = useCallback(() => {
     setLoading(true)
@@ -38,12 +39,14 @@ export default function Alerts() {
 
   const calcEst = async () => {
     if (!form.message) return toast('Add a message first', 'error')
+    setSaving(true)
     try {
       const r = await axios.post('/api/alerts', form)
       setEst(r.data)
       toast(`Draft created — est. ${r.data.estimated_recipients} recipients`)
       closeModal(); load()
     } catch (e) { toast(e.response?.data?.error || 'Error', 'error') }
+    finally { setSaving(false) }
   }
 
   const sendAlert = async (id) => {
@@ -70,7 +73,11 @@ export default function Alerts() {
       <div className="filter-bar">
         <div style={{ display: 'flex', gap: 16 }}>
           {['all','draft','sent'].map(s => (
-            <button key={s} className="btn btn-secondary btn-sm" style={{ textTransform: 'capitalize' }}>{s}</button>
+            <button key={s}
+              className={`btn btn-sm ${statusFilter === s ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ textTransform: 'capitalize' }}
+              onClick={() => setStatusFilter(s)}
+            >{s}</button>
           ))}
         </div>
         <button className="btn btn-primary" style={{ marginLeft: 'auto' }} onClick={openModal}>
@@ -84,7 +91,8 @@ export default function Alerts() {
         <div className="empty-state"><div className="empty-state-icon"><Bell size={48} /></div><h3>No alerts yet</h3><p>Compose a broadcast alert to farmers</p></div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {alerts.map(a => {
+          {alerts.filter(a => statusFilter === 'all' || a.status === statusFilter).map(a => {
+
             const meta = TYPE_META[a.type] || TYPE_META.broadcast
             const rate = deliveryRate(a)
             return (
