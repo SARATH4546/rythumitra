@@ -3,7 +3,7 @@
 > **AI-powered IVR + WhatsApp bot for Andhra Pradesh farmers**  
 > Real-time mandi prices · Government schemes · Weather advisories · Loan info
 
-![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?logo=nodedotjs) ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react) ![Vite](https://img.shields.io/badge/Vite-5-646CFF?logo=vite) ![Express](https://img.shields.io/badge/Express-4-000000?logo=express) ![NeDB](https://img.shields.io/badge/NeDB-pure%20JS-green) ![Twilio](https://img.shields.io/badge/Twilio-WhatsApp-F22F46?logo=twilio) ![Cloudflare](https://img.shields.io/badge/Cloudflare-Tunnel-F38020?logo=cloudflare)
+![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?logo=nodedotjs) ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react) ![Vite](https://img.shields.io/badge/Vite-5-646CFF?logo=vite) ![Express](https://img.shields.io/badge/Express-4-000000?logo=express) ![NeDB](https://img.shields.io/badge/NeDB-pure%20JS-green) ![Twilio](https://img.shields.io/badge/Twilio-WhatsApp-F22F46?logo=twilio) ![ngrok](https://img.shields.io/badge/ngrok-Static%20Domain-1F1E37?logo=ngrok)
 
 ---
 
@@ -14,10 +14,12 @@
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
+- [One-Click Startup](#one-click-startup)
 - [API Reference](#api-reference)
 - [IVR Simulator](#ivr-simulator)
 - [WhatsApp Bot](#whatsapp-bot)
-- [Real WhatsApp Integration](#real-whatsapp-integration-twilio)
+- [Real WhatsApp Integration](#real-whatsapp-integration-twilio--ngrok)
+- [Voice Audio System](#voice-audio-system)
 - [Admin Dashboard](#admin-dashboard)
 - [Seed Data](#seed-data)
 - [Tech Stack](#tech-stack)
@@ -38,9 +40,10 @@ The platform includes an **Admin Dashboard** for agricultural officers to manage
 |---------|-------------|
 | 📞 **IVR Simulator** | Full DTMF keypad flow — missed call → price/scheme/weather/loan menu |
 | 💬 **WhatsApp Bot** | Telugu + English intent detection, price cards, scheme cards, weather |
+| 🔊 **Telugu Voice Notes** | 23 synthesized Telugu MP3 audio files sent as WhatsApp voice notes |
 | 📊 **Mandi Prices** | Real-time prices for 20 crops × 13 AP districts, spike detection (>15%) |
 | 📋 **Govt Schemes** | PM-KISAN, Rythu Bharosa, PMFBY, KCC, YSR Insurance, NABARD |
-| 📢 **Alert Broadcasts** | Target by district + crop, WhatsApp/SMS delivery tracking |
+| 📢 **Alert Broadcasts** | Target by district + crop + status filter, WhatsApp/SMS delivery tracking |
 | 📈 **Analytics** | IVR call logs, WhatsApp intents, farmer growth, district leaderboard |
 | 👨‍🌾 **Farmer Registry** | 120+ farmers, CRUD, filter by district/crop/channel |
 
@@ -59,16 +62,21 @@ The platform includes an **Admin Dashboard** for agricultural officers to manage
 │  Admin Dashboard│ ◄──────────────► │                    │
 │  (React/Vite)   │                  └────────────────────┘
 └─────────────────┘                           ▲
-                                              │ Twilio Webhook
+                                              │ Twilio Webhook (POST)
                                    ┌──────────┴──────────┐
-                                   │  Cloudflare Tunnel   │
-                                   │  (Public HTTPS URL)  │
+                                   │  ngrok Static Tunnel │
+                                   │  wobble-colt-length  │
+                                   │  .ngrok-free.dev     │
                                    └─────────────────────┘
                                               ▲
                                    ┌──────────┴──────────┐
                                    │  Real WhatsApp       │
                                    │  (Twilio Sandbox)    │
                                    └─────────────────────┘
+
+  Voice Audio ──► GitHub Raw CDN ──► Twilio ──► WhatsApp Voice Note
+  (MP3 files)     (free, public,
+                   no interstitial)
 ```
 
 ---
@@ -76,20 +84,28 @@ The platform includes an **Admin Dashboard** for agricultural officers to manage
 ## Project Structure
 
 ```
-d:\Minor's\csp\
+csp/
+├── start.ps1                      ← One-click startup (all 3 services)
+├── generate_voices.py             ← Telugu TTS voice generation (edge-tts)
+├── voice/                         ← 23 Telugu MP3 audio files (GitHub-hosted)
+│   ├── greeting_new.mp3
+│   ├── price_normal.mp3
+│   ├── price_spike_up.mp3
+│   ├── price_spike_down.mp3
+│   ├── schemes_intro.mp3
+│   ├── weather_normal.mp3
+│   ├── weather_rain_warning.mp3
+│   ├── loan_kcc.mp3
+│   ├── unsubscribe.mp3
+│   └── ... (14 more)
+│
 ├── server/                        ← Node.js + Express backend
-│   ├── server.js                  ← Entry point, route mounts
+│   ├── server.js                  ← Entry point, route mounts, audio CDN headers
 │   ├── package.json
 │   ├── db/
 │   │   ├── database.js            ← NeDB datastore setup + auto-seed
 │   │   ├── seed.js                ← Realistic mock data generator
-│   │   ├── farmers.db             ← Auto-generated on first run
-│   │   ├── prices.db
-│   │   ├── schemes.db
-│   │   ├── alerts.db
-│   │   ├── ivr_calls.db
-│   │   ├── wa.db
-│   │   └── history.db
+│   │   └── *.db                   ← Auto-generated on first run
 │   └── routes/
 │       ├── farmers.js             ← CRUD + pagination + search
 │       ├── prices.js              ← Prices + spike detection + history
@@ -98,7 +114,7 @@ d:\Minor's\csp\
 │       ├── analytics.js           ← Aggregated metrics
 │       ├── ivr.js                 ← IVR call simulation engine
 │       ├── whatsapp.js            ← WhatsApp bot (dashboard simulator)
-│       └── twilio.js              ← Real WhatsApp via Twilio webhook
+│       └── twilio.js              ← Real WhatsApp via Twilio webhook + GitHub audio
 │
 └── client/                        ← React + Vite frontend
     ├── package.json
@@ -115,10 +131,10 @@ d:\Minor's\csp\
             ├── Farmers.jsx        ← Farmer table + add/edit modal
             ├── Prices.jsx         ← Mandi prices + spike alerts
             ├── Schemes.jsx        ← Scheme cards + toggle
-            ├── Alerts.jsx         ← Compose + send + delivery rate
+            ├── Alerts.jsx         ← Compose + send + status filter + delivery rate
             ├── Analytics.jsx      ← 4-tab analytics view
             ├── IVRSimulator.jsx   ← Phone keypad UI
-            └── WhatsAppBot.jsx    ← Chat UI with rich cards
+            └── WhatsAppBot.jsx    ← Chat UI with rich cards + voice notes
 ```
 
 ---
@@ -129,12 +145,14 @@ d:\Minor's\csp\
 
 - [Node.js](https://nodejs.org/) v18 or higher
 - npm v9 or higher
+- [ngrok](https://ngrok.com/) (for real WhatsApp integration)
 
 ### Installation
 
 ```powershell
-# Clone or navigate to project
-cd "d:\Minor's\csp"
+# Clone the repository
+git clone https://github.com/SARATH4546/rythumitra.git
+cd rythumitra
 
 # Install backend dependencies
 cd server
@@ -145,24 +163,40 @@ cd ..\client
 npm install
 ```
 
-### Running the App
+---
 
-Open **two terminal windows**:
+## One-Click Startup
 
-**Terminal 1 — Backend API:**
+Run everything (backend + frontend + ngrok tunnel) with a single command:
+
 ```powershell
-cd "d:\Minor's\csp\server"
+cd "d:\Minor's\csp"
+.\start.ps1
+```
+
+This opens three terminal windows automatically:
+- **Backend API** → `http://localhost:5000`
+- **Frontend Dashboard** → `http://localhost:5173`
+- **ngrok Tunnel** → `https://wobble-colt-length.ngrok-free.dev`
+
+### Manual Startup (3 terminals)
+
+**Terminal 1 — Backend:**
+```powershell
+cd server
 node server.js
 ```
-> API running at **http://localhost:5000**  
-> Database auto-seeds with 120 farmers, prices, 6 schemes, 350 IVR calls on first run.
 
 **Terminal 2 — Frontend:**
 ```powershell
-cd "d:\Minor's\csp\client"
+cd client
 npm run dev
 ```
-> Dashboard at **http://localhost:5173**
+
+**Terminal 3 — ngrok tunnel:**
+```powershell
+ngrok http --url=wobble-colt-length.ngrok-free.dev 5000
+```
 
 ---
 
@@ -181,7 +215,6 @@ npm run dev
 | GET | `/api/farmers/:id` | Get farmer by ID |
 | PUT | `/api/farmers/:id` | Update farmer |
 | DELETE | `/api/farmers/:id` | Delete farmer |
-| GET | `/api/farmers/stats/summary` | Farmer statistics |
 
 #### Query Params — GET /api/farmers
 ```
@@ -191,11 +224,12 @@ npm run dev
 ### Mandi Prices
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/prices` | All prices (filterable) |
-| POST | `/api/prices` | Add / override price |
+| GET | `/api/prices` | All prices (filterable by district/crop) |
+| POST | `/api/prices` | Add new price entry |
+| PUT | `/api/prices/:id` | Update existing price entry |
 | DELETE | `/api/prices/:id` | Delete price entry |
 | GET | `/api/prices/spikes` | Prices with >15% change vs 7-day avg |
-| GET | `/api/prices/history?crop=Chilli&district=Guntur` | 7-day history |
+| GET | `/api/prices/history` | 7-day price history |
 
 ### Schemes
 | Method | Endpoint | Description |
@@ -210,7 +244,7 @@ npm run dev
 |--------|----------|-------------|
 | GET | `/api/alerts` | All alerts |
 | POST | `/api/alerts` | Create draft alert |
-| POST | `/api/alerts/:id/send` | Send draft alert |
+| POST | `/api/alerts/:id/send` | Send draft alert to farmers |
 | DELETE | `/api/alerts/:id` | Delete alert |
 
 ### Analytics
@@ -232,18 +266,24 @@ npm run dev
 | POST | `/api/ivr/end` | End call |
 | GET | `/api/ivr/logs` | Recent call logs |
 
-### WhatsApp Bot
+### WhatsApp Bot (Dashboard Simulator)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/whatsapp/message` | Send message to bot |
 | POST | `/api/whatsapp/register` | Register farmer via WA |
 | GET | `/api/whatsapp/sessions` | Recent WA sessions |
 
-### Twilio Webhook
+### Twilio Webhook (Real WhatsApp)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/twilio/webhook` | Twilio WhatsApp webhook |
-| GET | `/api/twilio/webhook` | Health check for Twilio |
+| POST | `/api/twilio/webhook` | Receives incoming WhatsApp messages from Twilio |
+| GET | `/api/twilio/webhook` | Health check |
+
+### Audio Files (GitHub CDN)
+Voice audio is served from GitHub raw CDN — no local server needed for Twilio:
+```
+https://raw.githubusercontent.com/SARATH4546/rythumitra/main/voice/<filename>.mp3
+```
 
 ---
 
@@ -286,7 +326,7 @@ The IVR simulator replicates the farmer's experience when they give a **missed c
 | Unsubscribe | ఆపు | stop, unsubscribe |
 
 ### Response Types (Dashboard Simulator)
-- `text` — Plain text message with Telugu translation
+- `text` — Plain text with Telugu translation
 - `voice_note` — Simulated audio waveform UI
 - `price_card` — Min/Modal/Max price card with source
 - `scheme_card` — Scheme name, benefit, deadline
@@ -297,46 +337,109 @@ The IVR simulator replicates the farmer's experience when they give a **missed c
 
 ---
 
-## Real WhatsApp Integration (Twilio)
+## Real WhatsApp Integration (Twilio + ngrok)
 
 ### Requirements
-- Free [Twilio account](https://www.twilio.com/try-twilio) (no credit card)
-- Public URL via Cloudflare Tunnel
+- Free [Twilio account](https://www.twilio.com/try-twilio)
+- ngrok with a free static domain
 
 ### Setup Steps
 
-**1. Start Cloudflare Tunnel:**
+**1. Start all services:**
 ```powershell
-& "C:\Program Files (x86)\cloudflared\cloudflared.exe" tunnel --url http://localhost:5000
+.\start.ps1
 ```
-Note the generated URL (e.g. `https://xxxx.trycloudflare.com`)
 
 **2. Join Twilio WhatsApp Sandbox:**
-- Go to: Twilio Console → Messaging → Try it out → Send a WhatsApp message
+- Go to: [Twilio Console → Messaging → Try it out → Send a WhatsApp message](https://console.twilio.com/us1/develop/sms/try-it-out/whatsapp-learn)
 - Save `+1 (415) 523-8886` as a contact
 - Send `join <your-sandbox-code>` to that number on WhatsApp
 
-**3. Set Webhook URL in Twilio:**
+**3. Set Webhook URL in Twilio Sandbox Settings:**
 ```
-When a message comes in: https://xxxx.trycloudflare.com/api/twilio/webhook
+When a message comes in: https://wobble-colt-length.ngrok-free.dev/api/twilio/webhook
 Method: POST
 ```
 
-**4. Chat!** Send `Hello` to get started.
+**4. Chat!** Send `Hello` on WhatsApp to get started.
 
 ### Registration Flow (Real WhatsApp)
 ```
-You: Hello
-Bot: Welcome! Send your district name...
+You:  Hello
+Bot:  🔊 [Voice Note] + Welcome! Send your district name...
 
-You: Guntur
-Bot: Guntur selected! Now send your crop name...
+You:  Guntur
+Bot:  🔊 [Voice Note] + Guntur selected! Now send your crop name...
 
-You: Paddy
-Bot: ✅ Registered! + Today's Paddy price in Guntur
+You:  Paddy
+Bot:  🔊 [Voice Note] + ✅ Registered! + Today's Paddy price in Guntur
 
-You: ధర
-Bot: 🌾 Paddy — Guntur Mandi: ₹2,050/quintal
+You:  ధర
+Bot:  🔊 [Voice Note] + 🌾 Paddy — Guntur: ₹2,050/quintal (Min/Max)
+
+You:  పథకం
+Bot:  🔊 [Voice Note] + 📋 PM-KISAN, Rythu Bharosa scheme details
+
+You:  వాతావరణం
+Bot:  🔊 [Voice Note] + 🌦️ 3-day weather forecast for Guntur
+```
+
+---
+
+## Voice Audio System
+
+RythuMitra uses synthesized Telugu voice notes generated with Microsoft's `edge-tts` neural TTS engine.
+
+### Audio Files (23 total)
+
+| File | Trigger |
+|------|---------|
+| `greeting_new.mp3` | New user hello / returning user hello |
+| `reg_district_selected.mp3` | District chosen during registration |
+| `reg_complete.mp3` | Registration complete |
+| `price_normal.mp3` | Price query (normal market) |
+| `price_spike_up.mp3` | Price >10% above 7-day average |
+| `price_spike_down.mp3` | Price >10% below 7-day average |
+| `price_not_available.mp3` | No price data found |
+| `schemes_intro.mp3` | Scheme query |
+| `scheme_pmkisan.mp3` | PM-KISAN scheme |
+| `scheme_pmfby.mp3` | PMFBY scheme |
+| `scheme_ryhtubharosa.mp3` | Rythu Bharosa scheme |
+| `weather_normal.mp3` | Clear weather forecast |
+| `weather_rain_warning.mp3` | Heavy rain warning |
+| `loan_kcc.mp3` | KCC / NABARD loan info |
+| `loan_nabard.mp3` | NABARD loan info |
+| `unsubscribe.mp3` | Stop / unsubscribe |
+| `error_unknown.mp3` | Unknown intent / fallback |
+| `alert_price.mp3` | Price spike broadcast alert |
+| `alert_scheme_deadline.mp3` | Scheme deadline alert |
+| `ivr_main_menu.mp3` | IVR main menu prompt |
+| `ivr_reg_welcome.mp3` | IVR registration welcome |
+| `ivr_welcome_returning.mp3` | IVR returning farmer welcome |
+
+### How Audio Delivery Works
+
+```
+Bot receives "hello" on WhatsApp
+         │
+         ▼
+twilio.js constructs TWO TwiML <Message> elements:
+  1. <Message><Media>https://raw.githubusercontent.com/.../greeting_new.mp3</Media></Message>
+  2. <Message><Body>Namaskaram! Welcome to RythuMitra...</Body></Message>
+         │
+         ▼
+Twilio fetches MP3 from GitHub raw CDN (free, public, no interstitial)
+         │
+         ▼
+WhatsApp delivers: voice note + text message
+```
+
+> **Why GitHub CDN?** ngrok free plan shows a browser interstitial page that blocks Twilio from fetching audio files. GitHub raw URLs are always directly accessible.
+
+### Regenerate Voice Files
+```powershell
+pip install edge-tts
+python generate_voices.py
 ```
 
 ---
@@ -345,14 +448,14 @@ Bot: 🌾 Paddy — Guntur Mandi: ₹2,050/quintal
 
 | Page | Features |
 |------|----------|
-| **Overview** | 6 KPI cards, area chart (calls), bar chart (WA sessions), pie chart (districts), leaderboard |
+| **Overview** | 6 KPI cards, area chart (calls), bar chart (WA sessions), pie chart (districts) |
 | **Farmers** | Searchable table, filter by district/crop/channel, add/edit/delete modal |
-| **Mandi Prices** | Today's prices, ⚡ spike alerts (>15%), manual override with source tagging |
+| **Mandi Prices** | Today's prices, ⚡ spike alerts (>15%), add/edit (PUT) / delete entries |
 | **Schemes** | Card view, activate/deactivate toggle, CRUD with deadline tracking |
-| **Alerts** | Compose with targeting (district + crop + channel), draft → send, delivery rate bar |
+| **Alerts** | Compose with district+crop targeting, **status filter** (all/draft/sent), draft → send, delivery rate |
 | **Analytics** | 4 tabs: IVR logs, WA intents (pie), farmer growth (bar), district leaderboard |
 | **IVR Simulator** | Full phone keypad, live call transcript, Telugu audio labels |
-| **WhatsApp Bot** | Real chat UI, price/scheme/weather/loan cards, quick replies |
+| **WhatsApp Bot** | Real chat UI, price/scheme/weather/loan rich cards, voice note playback |
 
 ---
 
@@ -361,7 +464,7 @@ Bot: 🌾 Paddy — Guntur Mandi: ₹2,050/quintal
 On first run, the database is auto-populated with:
 
 | Collection | Records | Details |
-|------------|---------|---------|
+|------------|---------|---------||
 | Farmers | 120 | Spread across 13 AP districts, 20 crops |
 | Mandi Prices | 140 | 20 crops × 7 districts, today's prices |
 | Price History | 980 | 7 days × 20 crops × 7 districts |
@@ -383,24 +486,40 @@ On first run, the database is auto-populated with:
 | **Icons** | Lucide React | UI icons |
 | **HTTP Client** | Axios | Frontend API calls |
 | **Routing** | React Router v6 | SPA routing |
-| **Tunnel** | Cloudflare Tunnel | Expose localhost to internet |
+| **Tunnel** | ngrok (static domain) | Expose localhost for Twilio webhook |
 | **WhatsApp** | Twilio Sandbox | Real WhatsApp integration (testing) |
+| **Voice TTS** | Microsoft edge-tts | Telugu neural voice synthesis |
+| **Audio CDN** | GitHub Raw CDN | Free, public MP3 hosting for Twilio media |
 | **Styling** | Vanilla CSS | Dark agri-themed design system |
+
+---
+
+## Changelog
+
+### Latest Updates
+- ✅ **Voice notes in WhatsApp** — 23 Telugu MP3 files hosted on GitHub raw CDN; Twilio can fetch without interstitial
+- ✅ **Audio + Text delivery fix** — Audio and text sent as separate `<Message>` elements (WhatsApp drops body when combined with audio media)
+- ✅ **ngrok static tunnel** — Replaced unstable Cloudflare tunnel with permanent ngrok free domain
+- ✅ **One-click startup** — `start.ps1` launches backend + frontend + ngrok in 3 windows
+- ✅ **Prices edit fix** — Edit now correctly uses `PUT /api/prices/:id` (was always POST, causing duplicates)
+- ✅ **Alerts filter** — Status filter buttons (all/draft/sent) now functional
+- ✅ **WhatsApp Bot page fix** — Fixed JavaScript crash from `const` inside `switch` cases
+- ✅ **Audio URL fix** — Relative `/audio/` path used in dashboard simulator (was hardcoded to localhost)
 
 ---
 
 ## Notes
 
-- **No paid APIs required** — all telephony and messaging is simulated. Twilio Sandbox is free.
+- **No paid APIs required** — all telephony and messaging is simulated or uses free tiers. Twilio Sandbox and ngrok free plan are both free.
 - **NeDB** was chosen over SQLite (`better-sqlite3`) because it's pure JavaScript — no Visual Studio Build Tools or Windows SDK required for compilation.
-- **Cloudflare Tunnel** is used instead of ngrok/localtunnel because it has no password-gating that would block Twilio webhook requests.
-- Telugu text in responses is for display/demo purposes — in production, this would be passed to a TTS engine.
+- **GitHub raw CDN** is used for audio hosting because ngrok free plan shows a browser interstitial that blocks Twilio from fetching media files.
+- **Two-message TwiML** — WhatsApp silently drops `<Body>` text when combined with audio `<Media>` in the same `<Message>` element. Audio and text must be sent in separate messages.
 
 ---
 
 ## License
 
-This project is built as a **Community service project (CSP)** for academic purposes.
+This project is built as a **Community Service Project (CSP)** for academic purposes.
 
 ---
 
