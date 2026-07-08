@@ -1,7 +1,7 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Users, TrendingUp, ScrollText,
-  Bell, BarChart3, Phone, MessageCircle, Leaf
+  Bell, BarChart3, Phone, MessageCircle, Microscope, Mic
 } from 'lucide-react'
 
 const NAV = [
@@ -16,6 +16,10 @@ const NAV = [
 const SIM_NAV = [
   { label: 'IVR Simulator',     icon: Phone,         to: '/ivr' },
   { label: 'WhatsApp Bot',      icon: MessageCircle, to: '/whatsapp' },
+]
+
+const AI_NAV = [
+  { label: 'Disease Detection', icon: Microscope,    to: '/disease', badge: '🤖 AI' },
 ]
 
 export default function Sidebar() {
@@ -47,6 +51,16 @@ export default function Sidebar() {
             {label}
           </NavLink>
         ))}
+
+        <div className="nav-section-label" style={{ marginTop: 12 }}>AI Features</div>
+        {AI_NAV.map(({ label, icon: Icon, to, badge }) => (
+          <NavLink key={to} to={to} className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+            <Icon className="nav-icon" size={16} />
+            {label}
+            {badge && <span style={{ marginLeft:'auto', fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:8, background:'rgba(139,92,246,0.2)', color:'#8b5cf6' }}>{badge}</span>}
+          </NavLink>
+        ))}
+
       </nav>
 
       <div className="sidebar-footer">

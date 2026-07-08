@@ -1,7 +1,9 @@
+require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
-const path = require('path');
+const cors    = require('cors');
+const path    = require('path');
 const { initDb } = require('./db/database');
+
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -35,6 +37,8 @@ app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/ivr',       require('./routes/ivr'));
 app.use('/api/whatsapp',  require('./routes/whatsapp'));
 app.use('/api/twilio',    require('./routes/twilio'));
+app.use('/api/disease',   require('./routes/disease'));
+
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 

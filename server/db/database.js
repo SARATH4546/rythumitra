@@ -11,7 +11,9 @@ const db = {
   alerts:    Datastore.create({ filename: path.join(DB_DIR, 'alerts.db'),    autoload: true }),
   ivr_calls: Datastore.create({ filename: path.join(DB_DIR, 'ivr_calls.db'),autoload: true }),
   wa:        Datastore.create({ filename: path.join(DB_DIR, 'wa.db'),        autoload: true }),
+  disease:   Datastore.create({ filename: path.join(DB_DIR, 'disease.db'),   autoload: true }),
 };
+
 
 async function initDb() {
   // Create indexes for fast lookup
@@ -20,6 +22,8 @@ async function initDb() {
   await db.history.ensureIndex({ fieldName: 'date' }).catch(() => {});
   await db.ivr_calls.ensureIndex({ fieldName: 'created_at' }).catch(() => {});
   await db.wa.ensureIndex({ fieldName: 'updated_at' }).catch(() => {});
+  await db.disease.ensureIndex({ fieldName: 'detected_at' }).catch(() => {});
+
 
   // Seed if empty
   const count = await db.farmers.count({});

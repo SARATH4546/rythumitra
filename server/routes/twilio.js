@@ -1,7 +1,9 @@
+require('dotenv').config();
 const express = require('express');
-const router = express.Router();
-const { db } = require('../db/database');
+const router  = require('express').Router();
+const { db }  = require('../db/database');
 const { randomUUID } = require('crypto');
+const ai = require('../services/ai');
 
 const DISTRICTS = { guntur:'Guntur', krishna:'Krishna', kurnool:'Kurnool', 'east godavari':'East Godavari', 'west godavari':'West Godavari', visakhapatnam:'Visakhapatnam', nellore:'Nellore', prakasam:'Prakasam', chittoor:'Chittoor', kadapa:'Kadapa', anantapur:'Anantapur', srikakulam:'Srikakulam', vizianagaram:'Vizianagaram' };
 const CROPS_LIST = ['paddy','cotton','chilli','groundnut','maize','tobacco','sugarcane','onion','tomato','turmeric','banana','mango','jowar','bajra','sunflower','soybean','blackgram','greengram','redgram','sesame'];
@@ -52,15 +54,145 @@ const getSession = async mobile => {
 router.post('/webhook', async (req, res) => {
   res.set('Content-Type', 'text/xml');
   try {
-    const body   = req.body.Body || '';
-    const mobile = (req.body.From || '').replace('whatsapp:+','').replace('+','');
+    const rawBody  = req.body.Body || '';
+    const mobile   = (req.body.From || '').replace('whatsapp:+','').replace('+','');
+    const numMedia = parseInt(req.body.NumMedia || '0');
+    const mediaUrl = req.body.MediaUrl0 || null;
+    const mediaCT  = (req.body.MediaContentType0 || '').toLowerCase();
 
     // Audio URLs — served from GitHub raw CDN (free, no interstitial, Twilio-compatible)
     const audio = file => `${GITHUB_AUDIO}/${file}.mp3`;
 
-    const intent  = detect(body);
     const farmer  = await db.farmers.findOne({ mobile });
     const session = await getSession(mobile);
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // VOICE MESSAGE — farmer sent a voice note (.ogg audio)
+    // ══════════════════════════════════════════════════════════════════════════
+    if (numMedia > 0 && (mediaCT.includes('audio') || mediaCT.includes('ogg'))) {
+      console.log(`[Voice] Received audio from ${mobile}, transcribing...`);
+      let transcript = null;
+      let ttsUrl = null;
+
+      try {
+        const { data, contentType } = await ai.downloadTwilioMedia(
+          mediaUrl,
+          process.env.TWILIO_ACCOUNT_SID,
+          process.env.TWILIO_AUTH_TOKEN
+        );
+        transcript = await ai.transcribeVoice(data, contentType);
+        console.log(`[Voice] Transcript: "${transcript}"`);
+      } catch (err) {
+        console.error('[Voice] Transcription failed:', err.message);
+      }
+
+      if (!transcript) {
+        ttsUrl = ai.teluguTTSUrl('మీ వాయిస్ వినబడలేదు. దయచేసి మళ్ళీ ప్రయత్నించండి.');
+        return res.send(twiml(
+          ttsUrl || audio('error_unknown'),
+          '⚠️ మీ వాయిస్ అర్థం కాలేదు.\nPlease try again or type your message.'
+        ));
+      }
+
+      // Detect intent from transcript
+      const voiceIntent = detect(transcript);
+      await db.wa.update({ mobile }, { $set: {
+        messages_count: (session.messages_count||0)+1,
+        last_intent: `voice_${voiceIntent}`,
+        last_transcript: transcript,
+        updated_at: new Date().toISOString()
+      }});
+
+      // Generate smart AI response if Groq available
+      let aiReplyText = null;
+      if (ai.hasGroq()) {
+        const allP = farmer ? await db.prices.find({ crop: farmer.primary_crop, district: farmer.district }) : [];
+        const price = allP.sort((a,b) => b.date.localeCompare(a.date))[0];
+        aiReplyText = await ai.generateAIResponse(voiceIntent, { farmer, transcript, priceData: price });
+      }
+
+      // Dynamic TTS for the AI response
+      if (aiReplyText) {
+        ttsUrl = ai.teluguTTSUrl(aiReplyText.substring(0, 180));
+        return res.send(twiml(
+          ttsUrl || audio('greeting_new'),
+          `🎤 _"${transcript}"_\n\n${aiReplyText}`
+        ));
+      }
+
+      // Fallback: reuse intent-based responses with transcript context
+      const voiceReplyText = `🎤 _"${transcript}"_\n\nSending you info about: *${voiceIntent.replace('_',' ')}*`;
+      return res.send(twiml(audio('greeting_new'), voiceReplyText));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // IMAGE MESSAGE — farmer sent a crop photo for disease detection
+    // ══════════════════════════════════════════════════════════════════════════
+    if (numMedia > 0 && mediaCT.includes('image')) {
+      console.log(`[Disease] Received image from ${mobile}, analyzing...`);
+
+      // Immediate acknowledgement (Twilio has 15s timeout)
+      let diagnosis = null;
+      try {
+        const { data, contentType } = await ai.downloadTwilioMedia(
+          mediaUrl,
+          process.env.TWILIO_ACCOUNT_SID,
+          process.env.TWILIO_AUTH_TOKEN
+        );
+        diagnosis = await ai.detectCropDisease(data, contentType, farmer?.primary_crop || '');
+      } catch (err) {
+        console.error('[Disease] Detection failed:', err.message);
+      }
+
+      if (!diagnosis) {
+        return res.send(twiml(
+          audio('error_unknown'),
+          '⚠️ చిత్రం విశ్లేషణ సాధ్యపడలేదు.\nPlease send a clear photo of the affected plant part and try again.'
+        ));
+      }
+
+      // Save detection to DB
+      await db.disease.insert({
+        id:          randomUUID(),
+        mobile,
+        farmer_name: farmer?.name || 'Unknown',
+        district:    farmer?.district || 'Unknown',
+        crop:        farmer?.primary_crop || diagnosis.crop_detected || 'Unknown',
+        disease:     diagnosis.disease,
+        telugu_disease: diagnosis.telugu_disease || diagnosis.disease,
+        severity:    diagnosis.severity || 'unknown',
+        confidence:  diagnosis.confidence || 'medium',
+        is_healthy:  diagnosis.is_healthy || false,
+        treatment:   diagnosis.treatment || [],
+        organic_remedy: diagnosis.organic_remedy || '',
+        telugu_summary: diagnosis.telugu_summary || '',
+        media_url:   mediaUrl,
+        detected_at: new Date().toISOString(),
+        verified:    false,
+      });
+      await db.wa.update({ mobile }, { $set: {
+        messages_count: (session.messages_count||0)+1,
+        last_intent: 'image_disease',
+        updated_at: new Date().toISOString()
+      }});
+
+      const replyText = ai.formatDiseaseReply(diagnosis, farmer?.primary_crop);
+      // Generate Telugu TTS for the diagnosis summary
+      const diagnosisAudio = diagnosis.is_healthy
+        ? ai.teluguTTSUrl('మీ పంట ఆరోగ్యంగా ఉంది. చాలా బాగుంది!')
+        : ai.teluguTTSUrl((diagnosis.telugu_summary || '').substring(0, 180));
+
+      return res.send(twiml(
+        diagnosisAudio || audio('error_unknown'),
+        replyText
+      ));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // TEXT MESSAGE — regular text flow
+    // ══════════════════════════════════════════════════════════════════════════
+    const body  = rawBody;
+    const intent = detect(body);
     await db.wa.update({ mobile }, { $set: { messages_count:(session.messages_count||0)+1, last_intent:intent, updated_at:new Date().toISOString() } });
 
     // ── STOP ─────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ import Alerts from './pages/Alerts'
 import Analytics from './pages/Analytics'
 import IVRSimulator from './pages/IVRSimulator'
 import WhatsAppBot from './pages/WhatsAppBot'
+import DiseaseDetection from './pages/DiseaseDetection'
 import { ToastProvider } from './components/Toast'
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
                 <Route path="/analytics"  element={<Analytics />} />
                 <Route path="/ivr"        element={<IVRSimulator />} />
                 <Route path="/whatsapp"   element={<WhatsAppBot />} />
+                <Route path="/disease"    element={<DiseaseDetection />} />
               </Routes>
             </div>
           </div>
