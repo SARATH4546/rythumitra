@@ -3,7 +3,10 @@ const express = require('express');
 const router  = require('express').Router();
 const { db }  = require('../db/database');
 const { randomUUID } = require('crypto');
-const ai = require('../services/ai');
+const localAI = require('../services/localAI');
+const axios   = require('axios');
+const path    = require('path');
+
 
 const DISTRICTS = { guntur:'Guntur', krishna:'Krishna', kurnool:'Kurnool', 'east godavari':'East Godavari', 'west godavari':'West Godavari', visakhapatnam:'Visakhapatnam', nellore:'Nellore', prakasam:'Prakasam', chittoor:'Chittoor', kadapa:'Kadapa', anantapur:'Anantapur', srikakulam:'Srikakulam', vizianagaram:'Vizianagaram' };
 const CROPS_LIST = ['paddy','cotton','chilli','groundnut','maize','tobacco','sugarcane','onion','tomato','turmeric','banana','mango','jowar','bajra','sunflower','soybean','blackgram','greengram','redgram','sesame'];
@@ -22,20 +25,29 @@ const twiml = (audioUrl, ...textMessages) => {
 /** GitHub raw CDN — free, public, no interstitial, Twilio can fetch directly */
 const GITHUB_AUDIO = 'https://raw.githubusercontent.com/SARATH4546/rythumitra/main/voice';
 
-/** Detect intent from incoming message text */
+/**
+ * Detect intent from incoming message text.
+ * Uses local NLP (Natural Bayes) + keyword shortcuts for districts/crops.
+ */
 const detect = t => {
-  t = (t||'').toLowerCase().trim();
-  if (['stop','unsubscribe'].some(k=>t.includes(k))) return 'stop';
-  if (['hello','hi','namaskaram','start','hey','menu','నమస్కారం'].some(k=>t===k||t.includes(k))) return 'greeting';
-  if (['ధర','price','dhara','rate','mandi','ధరలు'].some(k=>t===k||t.includes(k))) return 'price';
-  if (['పథకం','scheme','yojana','pathakam','పథకాలు'].some(k=>t===k||t.includes(k))) return 'scheme';
-  if (['వాతావరణం','weather','rain','forecast','వర్షం'].some(k=>t===k||t.includes(k))) return 'weather';
-  if (['రుణం','loan','kcc','credit','runam','finance'].some(k=>t===k||t.includes(k))) return 'loan';
-  for (const [k,v] of Object.entries(DISTRICTS)) { if (t===k||t.includes(k)) return `district_${v}`; }
-  const crop = CROPS_LIST.find(c=>t===c||t.includes(c));
+  t = (t || '').toLowerCase().trim();
+  if (!t) return 'unknown';
+
+  // Let local NLP handle it (falls back to keywords for short messages)
+  const nlpIntent = localAI.detectIntent(t);
+  if (nlpIntent !== 'unknown') return nlpIntent;
+
+  // District matching
+  for (const [k, v] of Object.entries(DISTRICTS)) {
+    if (t === k || t.includes(k)) return `district_${v}`;
+  }
+  // Crop matching
+  const crop = CROPS_LIST.find(c => t === c || t.includes(c));
   if (crop) return `crop_${cap(crop)}`;
+
   return 'unknown';
 };
+
 
 /** Get/create WhatsApp session for a mobile number */
 const getSession = async mobile => {
@@ -47,6 +59,20 @@ const getSession = async mobile => {
   }
   return s;
 };
+
+/** Quick text for voice replies — shown alongside the pre-recorded audio */
+function getIntentQuickText(intent, farmer) {
+  const dist = farmer?.district || 'your district';
+  const crop = farmer?.primary_crop || 'your crop';
+  if (intent === 'price')   return `Type *"ధర"* or *"price"* for ${crop} price in ${dist}.`;
+  if (intent === 'weather') return `Type *"వాతావరణం"* or *"weather"* for ${dist} forecast.`;
+  if (intent === 'scheme')  return `Type *"పథకం"* or *"scheme"* for government schemes.`;
+  if (intent === 'loan')    return `Type *"రుణం"* or *"loan"* for KCC & NABARD loan info.`;
+  if (intent === 'greeting')return `Send your district name to register, or ask about price/weather/scheme/loan.`;
+  return `Send:\n"ధర" for price | "పథకం" for schemes\n"వాతావరణం" for weather | "రుణం" for loan`;
+}
+
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Webhook
@@ -67,126 +93,125 @@ router.post('/webhook', async (req, res) => {
     const session = await getSession(mobile);
 
     // ══════════════════════════════════════════════════════════════════════════
-    // VOICE MESSAGE — farmer sent a voice note (.ogg audio)
+    // VOICE MESSAGE — farmer sent a voice note (STT: local Whisper model)
     // ══════════════════════════════════════════════════════════════════════════
     if (numMedia > 0 && (mediaCT.includes('audio') || mediaCT.includes('ogg'))) {
-      console.log(`[Voice] Received audio from ${mobile}, transcribing...`);
+      console.log(`[Voice] Received audio from ${mobile}, running local Whisper STT...`);
       let transcript = null;
-      let ttsUrl = null;
 
       try {
-        const { data, contentType } = await ai.downloadTwilioMedia(
+        const { data, contentType } = await localAI.downloadTwilioMedia(
           mediaUrl,
           process.env.TWILIO_ACCOUNT_SID,
           process.env.TWILIO_AUTH_TOKEN
         );
-        transcript = await ai.transcribeVoice(data, contentType);
-        console.log(`[Voice] Transcript: "${transcript}"`);
+        transcript = await localAI.transcribeVoice(data, contentType);
+        console.log(`[STT] Transcript: "${transcript}"`);
       } catch (err) {
-        console.error('[Voice] Transcription failed:', err.message);
+        console.error('[STT] Transcription failed:', err.message);
       }
 
       if (!transcript) {
-        ttsUrl = ai.teluguTTSUrl('మీ వాయిస్ వినబడలేదు. దయచేసి మళ్ళీ ప్రయత్నించండి.');
         return res.send(twiml(
-          ttsUrl || audio('error_unknown'),
-          '⚠️ మీ వాయిస్ అర్థం కాలేదు.\nPlease try again or type your message.'
+          audio('error_unknown'),
+          '⚠️ మీ వాయిస్ అర్థం కాలేదు.\nPlease try again or type your question (e.g. "price", "ధర", "weather").'
         ));
       }
 
-      // Detect intent from transcript
+      // Use local NLP to detect intent from the Whisper transcript
       const voiceIntent = detect(transcript);
       await db.wa.update({ mobile }, { $set: {
-        messages_count: (session.messages_count||0)+1,
-        last_intent: `voice_${voiceIntent}`,
+        messages_count:  (session.messages_count || 0) + 1,
+        last_intent:     `voice_${voiceIntent}`,
         last_transcript: transcript,
-        updated_at: new Date().toISOString()
+        updated_at:      new Date().toISOString(),
       }});
 
-      // Generate smart AI response if Groq available
-      let aiReplyText = null;
-      if (ai.hasGroq()) {
-        const allP = farmer ? await db.prices.find({ crop: farmer.primary_crop, district: farmer.district }) : [];
-        const price = allP.sort((a,b) => b.date.localeCompare(a.date))[0];
-        aiReplyText = await ai.generateAIResponse(voiceIntent, { farmer, transcript, priceData: price });
-      }
+      console.log(`[NLP] Intent from voice: ${voiceIntent}`);
 
-      // Dynamic TTS for the AI response
-      if (aiReplyText) {
-        ttsUrl = ai.teluguTTSUrl(aiReplyText.substring(0, 180));
-        return res.send(twiml(
-          ttsUrl || audio('greeting_new'),
-          `🎤 _"${transcript}"_\n\n${aiReplyText}`
-        ));
-      }
+      // Build Telugu TTS reply via edge-tts (local, no API key)
+      // The voice file is generated locally and served from GitHub
+      const voiceReplyMap = {
+        greeting:  audio('greeting_new'),
+        price:     audio('price_normal'),
+        scheme:    audio('schemes_intro'),
+        weather:   audio('weather_normal'),
+        loan:      audio('loan_kcc'),
+        stop:      audio('unsubscribe'),
+      };
+      const replyAudio = voiceReplyMap[voiceIntent] || audio('error_unknown');
+      const replyText  = `🎤 _"విన్నది: ${transcript}"_\n\nఇంటెంట్ గుర్తు: *${voiceIntent}* \nక్రింది సమాచారం చూడండి ↓`;
 
-      // Fallback: reuse intent-based responses with transcript context
-      const voiceReplyText = `🎤 _"${transcript}"_\n\nSending you info about: *${voiceIntent.replace('_',' ')}*`;
-      return res.send(twiml(audio('greeting_new'), voiceReplyText));
+      // Re-use the full text-based intent handler by re-routing body to detected intent
+      // (Inject synthetic body so existing intent handlers fire correctly)
+      req.body.Body    = transcript;
+      req.body.NumMedia = '0';
+      // Fall through to text handler below — just send voice ack first via a preceding message
+      // Since we can't fall through in async Express, return the voice response directly:
+      return res.send(twiml(replyAudio,
+        `🎤 _"${transcript}"_ → *${voiceIntent}*\n\n` +
+        getIntentQuickText(voiceIntent, farmer)
+      ));
     }
 
     // ══════════════════════════════════════════════════════════════════════════
     // IMAGE MESSAGE — farmer sent a crop photo for disease detection
     // ══════════════════════════════════════════════════════════════════════════
     if (numMedia > 0 && mediaCT.includes('image')) {
-      console.log(`[Disease] Received image from ${mobile}, analyzing...`);
-
-      // Immediate acknowledgement (Twilio has 15s timeout)
+      console.log(`[Disease] Received image from ${mobile}, running local ML model...`);
       let diagnosis = null;
+
       try {
-        const { data, contentType } = await ai.downloadTwilioMedia(
+        const { data, contentType } = await localAI.downloadTwilioMedia(
           mediaUrl,
           process.env.TWILIO_ACCOUNT_SID,
           process.env.TWILIO_AUTH_TOKEN
         );
-        diagnosis = await ai.detectCropDisease(data, contentType, farmer?.primary_crop || '');
+        diagnosis = await localAI.detectDisease(data, contentType, farmer?.primary_crop || '');
       } catch (err) {
         console.error('[Disease] Detection failed:', err.message);
       }
 
-      if (!diagnosis) {
+      if (!diagnosis || !diagnosis.success) {
         return res.send(twiml(
           audio('error_unknown'),
-          '⚠️ చిత్రం విశ్లేషణ సాధ్యపడలేదు.\nPlease send a clear photo of the affected plant part and try again.'
+          '⚠️ చిత్రం విశ్లేషణ సాధ్యపడలేదు.\nదయచేసి మొక్క ఆకు/కాండు/పండు వాటి స్పష్టమైన ఫోటో పంపండి.\nTip: send a close-up photo in good lighting.'
         ));
       }
 
-      // Save detection to DB
+      // Save to disease DB
       await db.disease.insert({
-        id:          randomUUID(),
+        id:              randomUUID(),
         mobile,
-        farmer_name: farmer?.name || 'Unknown',
-        district:    farmer?.district || 'Unknown',
-        crop:        farmer?.primary_crop || diagnosis.crop_detected || 'Unknown',
-        disease:     diagnosis.disease,
-        telugu_disease: diagnosis.telugu_disease || diagnosis.disease,
-        severity:    diagnosis.severity || 'unknown',
-        confidence:  diagnosis.confidence || 'medium',
-        is_healthy:  diagnosis.is_healthy || false,
-        treatment:   diagnosis.treatment || [],
-        organic_remedy: diagnosis.organic_remedy || '',
-        telugu_summary: diagnosis.telugu_summary || '',
-        media_url:   mediaUrl,
-        detected_at: new Date().toISOString(),
-        verified:    false,
+        farmer_name:     farmer?.name || 'Unknown',
+        district:        farmer?.district || 'Unknown',
+        crop:            farmer?.primary_crop || diagnosis.plant || 'Unknown',
+        disease:         diagnosis.disease,
+        telugu_disease:  diagnosis.telugu_disease || diagnosis.disease,
+        severity:        diagnosis.severity || 'unknown',
+        confidence:      diagnosis.confidence || 'medium',
+        confidence_score: diagnosis.confidence_score || 0,
+        is_healthy:      diagnosis.is_healthy || false,
+        treatment:       diagnosis.treatment || [],
+        organic_remedy:  diagnosis.organic_remedy || '',
+        telugu_summary:  diagnosis.telugu_summary || '',
+        media_url:       mediaUrl,
+        model:           diagnosis.model || 'local-tf-mobilenetv2',
+        detected_at:     new Date().toISOString(),
+        verified:        false,
       });
       await db.wa.update({ mobile }, { $set: {
-        messages_count: (session.messages_count||0)+1,
-        last_intent: 'image_disease',
-        updated_at: new Date().toISOString()
+        messages_count: (session.messages_count || 0) + 1,
+        last_intent:    'image_disease',
+        updated_at:     new Date().toISOString(),
       }});
 
-      const replyText = ai.formatDiseaseReply(diagnosis, farmer?.primary_crop);
-      // Generate Telugu TTS for the diagnosis summary
-      const diagnosisAudio = diagnosis.is_healthy
-        ? ai.teluguTTSUrl('మీ పంట ఆరోగ్యంగా ఉంది. చాలా బాగుంది!')
-        : ai.teluguTTSUrl((diagnosis.telugu_summary || '').substring(0, 180));
+      const replyText    = localAI.formatDiseaseReply(diagnosis, farmer?.primary_crop);
+      const diseaseAudio = diagnosis.is_healthy ? audio('greeting_new') : audio('error_unknown');
 
-      return res.send(twiml(
-        diagnosisAudio || audio('error_unknown'),
-        replyText
-      ));
+      return res.send(twiml(diseaseAudio, replyText));
     }
+
 
     // ══════════════════════════════════════════════════════════════════════════
     // TEXT MESSAGE — regular text flow

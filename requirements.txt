@@ -1,0 +1,14 @@
+# RythuMitra v2 — Python Requirements
+# Install: pip install -r requirements.txt
+
+# Speech-to-Text (runs Whisper model locally — no API key)
+faster-whisper>=1.0.0
+
+# Text-to-Speech (Microsoft Neural TTS — no API key, no registration)
+edge-tts>=6.1.0
+
+# Deep Learning for Crop Disease Detection
+tensorflow>=2.15.0
+Pillow>=10.0.0
+numpy>=1.24.0
+requests>=2.31.0
