@@ -23,7 +23,11 @@ fs.mkdirSync(VOICE_DIR, { recursive: true });
 function runPython(scriptName, args = [], timeoutMs = 60000) {
   return new Promise((resolve, reject) => {
     const scriptPath = path.join(PYTHON_DIR, scriptName);
-    const proc = spawn('python', [scriptPath, ...args], { timeout: timeoutMs });
+    const proc = spawn('python', [scriptPath, ...args], {
+      timeout: timeoutMs,
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },  // Telugu Unicode support on Windows
+    });
+
 
     let stdout = '';
     let stderr = '';

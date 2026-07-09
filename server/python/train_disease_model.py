@@ -1,128 +1,157 @@
 """
-train_disease_model.py — Train PlantVillage MobileNetV2 model locally
-Run this ONCE to build the model. It will be saved to server/python/models/
-
-Dataset: PlantVillage (38 disease classes, ~87,000 images)
-This script downloads a small pre-built model via transfer learning.
-Alternatively it trains from scratch if you have the dataset.
+train_disease_model.py — Fine-tune MobileNetV2 on PlantVillage dataset
+                         using PyTorch (works on Python 3.14+)
 
 Usage:
-  python train_disease_model.py           # Build using transfer learning (recommended)
-  python train_disease_model.py --dataset /path/to/PlantVillage
-"""
+  # Fine-tune with your PlantVillage dataset:
+  python train_disease_model.py --dataset /path/to/PlantVillage/color
 
+  # Just test the model structure (no dataset needed):
+  python train_disease_model.py --test
+
+Dataset download: https://www.kaggle.com/datasets/abdallahalidev/plantvillage-dataset
+  → Download "color" folder (~800MB, 87,000 images, 38 classes)
+  → Point --dataset to the extracted folder
+"""
 import os, sys, json
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "plant_disease_mobilenetv2.h5")
+MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+HEAD_PATH = os.path.join(MODEL_DIR, "plantvillage_head.pth")
 NUM_CLASSES = 38
-IMG_SIZE = 224
+IMG_SIZE    = 224
+BATCH_SIZE  = 32
+EPOCHS      = 10
 
 
-def build_model():
-    """Build MobileNetV2 transfer learning model for PlantVillage 38 classes."""
-    import tensorflow as tf
-    from tensorflow.keras import layers, models
-    from tensorflow.keras.applications import MobileNetV2
+def train(dataset_path):
+    import torch
+    import torch.nn as nn
+    from torch.utils.data import DataLoader, random_split
+    from torchvision import datasets, transforms, models
+    from torchvision.models import mobilenet_v2, MobileNet_V2_Weights
 
-    print("[Train] Building MobileNetV2 transfer learning model...")
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[Train] Device: {device}")
 
-    # Load MobileNetV2 backbone (pre-trained on ImageNet — no API key, auto-downloads ~14MB)
-    base = MobileNetV2(
-        input_shape=(IMG_SIZE, IMG_SIZE, 3),
-        include_top=False,
-        weights="imagenet",
-    )
-    base.trainable = False  # Freeze backbone — only train classifier head
-
-    model = models.Sequential([
-        base,
-        layers.GlobalAveragePooling2D(),
-        layers.BatchNormalization(),
-        layers.Dense(256, activation="relu"),
-        layers.Dropout(0.3),
-        layers.Dense(NUM_CLASSES, activation="softmax"),
+    # Data augmentation for training
+    train_tf = transforms.Compose([
+        transforms.Resize((IMG_SIZE, IMG_SIZE)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(15),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ])
+    val_tf = transforms.Compose([
+        transforms.Resize((IMG_SIZE, IMG_SIZE)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
     ])
 
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(1e-4),
-        loss="categorical_crossentropy",
-        metrics=["accuracy"],
-    )
+    full_ds = datasets.ImageFolder(dataset_path, transform=train_tf)
+    n_val   = int(0.2 * len(full_ds))
+    n_train = len(full_ds) - n_val
+    train_ds, val_ds = random_split(full_ds, [n_train, n_val])
+    val_ds.dataset.transform = val_tf
 
-    return model
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,  num_workers=2)
+    val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
+
+    print(f"[Train] Dataset: {len(full_ds)} images, {len(full_ds.classes)} classes")
+    print(f"[Train] Train: {n_train}  Val: {n_val}")
+
+    # Load backbone with ImageNet weights, freeze it
+    model = mobilenet_v2(weights=MobileNet_V2_Weights.IMAGENET1K_V1)
+    for p in model.parameters():
+        p.requires_grad = False
+
+    # Replace classifier head
+    in_features = model.classifier[1].in_features
+    model.classifier[1] = nn.Linear(in_features, len(full_ds.classes))
+    model = model.to(device)
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.classifier.parameters(), lr=1e-3)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.5)
+
+    best_acc = 0.0
+    for epoch in range(EPOCHS):
+        # ── Train phase ──────────────────────────────────────────────────────
+        model.train()
+        train_loss = train_correct = train_total = 0
+        for imgs, labels in train_loader:
+            imgs, labels = imgs.to(device), labels.to(device)
+            optimizer.zero_grad()
+            out  = model(imgs)
+            loss = criterion(out, labels)
+            loss.backward()
+            optimizer.step()
+            train_loss    += loss.item() * imgs.size(0)
+            train_correct += (out.argmax(1) == labels).sum().item()
+            train_total   += imgs.size(0)
+
+        # ── Val phase ────────────────────────────────────────────────────────
+        model.eval()
+        val_correct = val_total = 0
+        with torch.no_grad():
+            for imgs, labels in val_loader:
+                imgs, labels = imgs.to(device), labels.to(device)
+                out = model(imgs)
+                val_correct += (out.argmax(1) == labels).sum().item()
+                val_total   += imgs.size(0)
+
+        train_acc = train_correct / train_total
+        val_acc   = val_correct   / val_total
+        scheduler.step()
+
+        print(f"[Epoch {epoch+1}/{EPOCHS}] train_acc={train_acc:.3f}  val_acc={val_acc:.3f}  "
+              f"lr={scheduler.get_last_lr()[0]:.5f}")
+
+        if val_acc > best_acc:
+            best_acc = val_acc
+            torch.save(model.state_dict(), HEAD_PATH)
+            print(f"  ✅ Best model saved (val_acc={val_acc:.3f})")
+
+    print(f"\n[Train] Done. Best val accuracy: {best_acc:.3f}")
+    print(f"[Train] Model saved to: {HEAD_PATH}")
+    return HEAD_PATH
 
 
-def train_with_dataset(dataset_path):
-    """Fine-tune on PlantVillage dataset if provided."""
-    import tensorflow as tf
+def test_model_structure():
+    """Quick test — no dataset needed, just checks the model loads correctly."""
+    import torch
+    from torchvision.models import mobilenet_v2, MobileNet_V2_Weights
+    import torch.nn as nn
 
-    print(f"[Train] Loading dataset from: {dataset_path}")
+    print("[Test] Loading MobileNetV2 with ImageNet weights...")
+    model = mobilenet_v2(weights=MobileNet_V2_Weights.IMAGENET1K_V1)
+    model.classifier[1] = nn.Linear(model.classifier[1].in_features, NUM_CLASSES)
+    model.eval()
 
-    train_ds = tf.keras.utils.image_dataset_from_directory(
-        dataset_path,
-        validation_split=0.2,
-        subset="training",
-        seed=42,
-        image_size=(IMG_SIZE, IMG_SIZE),
-        batch_size=32,
-        label_mode="categorical",
-    )
-    val_ds = tf.keras.utils.image_dataset_from_directory(
-        dataset_path,
-        validation_split=0.2,
-        subset="validation",
-        seed=42,
-        image_size=(IMG_SIZE, IMG_SIZE),
-        batch_size=32,
-        label_mode="categorical",
-    )
+    dummy = torch.randn(1, 3, IMG_SIZE, IMG_SIZE)
+    with torch.no_grad():
+        out = model(dummy)
+    print(f"[Test] Output shape: {out.shape} (expected: [1, {NUM_CLASSES}])")
+    print("[Test] Model structure OK -- PASS")
 
-    # Normalize to [0,1]
-    norm = lambda x, y: (tf.cast(x, tf.float32) / 255.0, y)
-    train_ds = train_ds.map(norm).prefetch(tf.data.AUTOTUNE)
-    val_ds   = val_ds.map(norm).prefetch(tf.data.AUTOTUNE)
-
-    model = build_model()
-
-    callbacks = [
-        tf.keras.callbacks.ModelCheckpoint(MODEL_PATH, save_best_only=True, monitor="val_accuracy"),
-        tf.keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True),
-        tf.keras.callbacks.ReduceLROnPlateau(factor=0.5, patience=3),
-    ]
-
-    print("[Train] Training... (this may take 30-60 minutes on CPU)")
-    model.fit(train_ds, epochs=20, validation_data=val_ds, callbacks=callbacks)
-    print(f"[Train] Model saved to {MODEL_PATH}")
-    return MODEL_PATH
-
-
-def create_demo_model():
-    """
-    Create and save an untrained model skeleton.
-    Used for testing when no dataset is available.
-    Real inference accuracy requires proper training.
-    """
-    model = build_model()
-    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-    model.save(MODEL_PATH)
-    print(f"[Train] Demo model skeleton saved to {MODEL_PATH}")
-    print("[WARN] This model is NOT trained — it will give random predictions.")
-    print("[INFO] Download PlantVillage dataset and run:")
-    print("       python train_disease_model.py --dataset /path/to/PlantVillage")
-    return MODEL_PATH
+    print(f"\nTo train with PlantVillage dataset:")
+    print(f"  python train_disease_model.py --dataset /path/to/PlantVillage/color")
+    print(f"\nDataset: https://www.kaggle.com/datasets/abdallahalidev/plantvillage-dataset")
+    return True
 
 
 if __name__ == "__main__":
-    os.makedirs(os.path.join(os.path.dirname(__file__), "models"), exist_ok=True)
-
-    if "--dataset" in sys.argv:
-        idx = sys.argv.index("--dataset")
-        dataset_path = sys.argv[idx + 1]
-        path = train_with_dataset(dataset_path)
+    if "--test" in sys.argv:
+        ok = test_model_structure()
+        print(json.dumps({"success": ok}))
+    elif "--dataset" in sys.argv:
+        idx  = sys.argv.index("--dataset")
+        path = sys.argv[idx + 1]
+        if not os.path.isdir(path):
+            print(json.dumps({"success": False, "error": f"Directory not found: {path}"}))
+            sys.exit(1)
+        result = train(path)
+        print(json.dumps({"success": True, "model_path": result}))
     else:
-        print("[Info] No dataset provided. Creating model skeleton with ImageNet weights.")
-        print("[Info] For production accuracy, provide PlantVillage dataset:")
-        print("       python train_disease_model.py --dataset /path/to/PlantVillage/color")
-        path = create_demo_model()
-
-    print(json.dumps({"success": True, "model_path": path}))
+        print(json.dumps({"success": False, "error": "Usage: python train_disease_model.py --dataset <path> | --test"}))

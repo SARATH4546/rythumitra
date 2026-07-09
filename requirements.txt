@@ -1,14 +1,18 @@
 # RythuMitra v2 — Python Requirements
 # Install: pip install -r requirements.txt
+#
+# Note: TensorFlow does NOT support Python 3.14.
+# This project uses PyTorch instead (supports Python 3.14+).
 
-# Speech-to-Text (runs Whisper model locally — no API key)
+# ── Speech-to-Text (local Whisper model, runs on CPU, no API key) ──
 faster-whisper>=1.0.0
 
-# Text-to-Speech (Microsoft Neural TTS — no API key, no registration)
+# ── Text-to-Speech (Microsoft Neural TTS, no API key, free) ──
 edge-tts>=6.1.0
 
-# Deep Learning for Crop Disease Detection
-tensorflow>=2.15.0
+# ── Deep Learning for Crop Disease Detection ──
+# Install PyTorch CPU via: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+torch>=2.0.0
+torchvision>=0.15.0
 Pillow>=10.0.0
 numpy>=1.24.0
-requests>=2.31.0

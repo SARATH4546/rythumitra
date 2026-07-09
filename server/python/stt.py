@@ -5,6 +5,10 @@ Output: JSON {transcript, language, duration}
 """
 import sys, json, os, traceback
 
+# Fix Windows console encoding for Telugu/Unicode output
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
 def transcribe(audio_path, language="te"):
     try:
         from faster_whisper import WhisperModel

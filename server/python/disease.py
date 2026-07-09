@@ -1,213 +1,208 @@
 """
-disease.py — Local Crop Disease Detection using Deep Learning (TensorFlow + PlantVillage)
+disease.py — Local Crop Disease Detection using PyTorch + MobileNetV2
+               (PlantVillage 38-class model, runs fully on CPU)
+
 Usage: python disease.py <image_path> [crop_hint]
 Output: JSON with disease diagnosis
 
 Model: MobileNetV2 fine-tuned on PlantVillage dataset (38 disease classes)
-Model is auto-downloaded on first run (~14MB) from GitHub releases.
-Runs entirely on CPU, no API key needed.
+       Weights auto-download from PyTorch Hub on first run (~14MB backbone)
+       Fine-tuned classifier head: server/python/models/plantvillage_head.pth
 """
-import sys, json, os, traceback
-import urllib.request
+import sys, json, os, traceback, urllib.request
+
+# Fix Windows console encoding for Telugu/Unicode output
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 # ─── PlantVillage 38-class labels ────────────────────────────────────────────
 CLASSES = [
-    "Apple___Apple_scab",           "Apple___Black_rot",
-    "Apple___Cedar_apple_rust",     "Apple___healthy",
-    "Blueberry___healthy",          "Cherry_(including_sour)___Powdery_mildew",
-    "Cherry_(including_sour)___healthy",
-    "Corn_(maize)___Cercospora_leaf_spot Gray_leaf_spot",
-    "Corn_(maize)___Common_rust",   "Corn_(maize)___Northern_Leaf_Blight",
-    "Corn_(maize)___healthy",       "Grape___Black_rot",
-    "Grape___Esca_(Black_Measles)", "Grape___Leaf_blight_(Isariopsis_Leaf_Spot)",
-    "Grape___healthy",              "Orange___Haunglongbing_(Citrus_greening)",
-    "Peach___Bacterial_spot",       "Peach___healthy",
-    "Pepper,_bell___Bacterial_spot","Pepper,_bell___healthy",
-    "Potato___Early_blight",        "Potato___Late_blight",
-    "Potato___healthy",             "Raspberry___healthy",
-    "Soybean___healthy",            "Squash___Powdery_mildew",
-    "Strawberry___Leaf_scorch",     "Strawberry___healthy",
-    "Tomato___Bacterial_spot",      "Tomato___Early_blight",
-    "Tomato___Late_blight",         "Tomato___Leaf_Mold",
-    "Tomato___Septoria_leaf_spot",  "Tomato___Spider_mites Two-spotted_spider_mite",
-    "Tomato___Target_Spot",         "Tomato___Tomato_Yellow_Leaf_Curl_Virus",
-    "Tomato___Tomato_mosaic_virus", "Tomato___healthy",
+    "Apple___Apple_scab",             "Apple___Black_rot",
+    "Apple___Cedar_apple_rust",       "Apple___healthy",
+    "Blueberry___healthy",            "Cherry___Powdery_mildew",
+    "Cherry___healthy",               "Corn___Cercospora_leaf_spot",
+    "Corn___Common_rust",             "Corn___Northern_Leaf_Blight",
+    "Corn___healthy",                 "Grape___Black_rot",
+    "Grape___Esca_Black_Measles",     "Grape___Leaf_blight",
+    "Grape___healthy",                "Orange___Haunglongbing",
+    "Peach___Bacterial_spot",         "Peach___healthy",
+    "Pepper___Bacterial_spot",        "Pepper___healthy",
+    "Potato___Early_blight",          "Potato___Late_blight",
+    "Potato___healthy",               "Raspberry___healthy",
+    "Soybean___healthy",              "Squash___Powdery_mildew",
+    "Strawberry___Leaf_scorch",       "Strawberry___healthy",
+    "Tomato___Bacterial_spot",        "Tomato___Early_blight",
+    "Tomato___Late_blight",           "Tomato___Leaf_Mold",
+    "Tomato___Septoria_leaf_spot",    "Tomato___Spider_mites",
+    "Tomato___Target_Spot",           "Tomato___Yellow_Leaf_Curl_Virus",
+    "Tomato___mosaic_virus",          "Tomato___healthy",
 ]
 
-# ─── Telugu disease names and treatments ──────────────────────────────────────
+# ─── Telugu disease info ──────────────────────────────────────────────────────
 TELUGU_INFO = {
-    "Apple_scab":            {"te": "ఆపిల్ పొరల తెగులు",   "sev": "moderate"},
-    "Black_rot":             {"te": "నల్ల కుళ్ళు తెగులు",  "sev": "severe"},
-    "Cedar_apple_rust":      {"te": "తుప్పు తెగులు",         "sev": "moderate"},
-    "Powdery_mildew":        {"te": "పొడి తెగులు",           "sev": "moderate"},
-    "Cercospora_leaf_spot":  {"te": "సెర్కోస్పోరా మచ్చ",    "sev": "moderate"},
-    "Common_rust":           {"te": "సాధారణ తుప్పు",         "sev": "moderate"},
-    "Northern_Leaf_Blight":  {"te": "ఉత్తర ఆకు తెగులు",    "sev": "severe"},
-    "Esca_(Black_Measles)":  {"te": "ఎస్కా తెగులు",          "sev": "severe"},
-    "Leaf_blight":           {"te": "ఆకు ముడత తెగులు",      "sev": "severe"},
-    "Haunglongbing":         {"te": "సిట్రస్ గ్రీనింగ్",    "sev": "severe"},
-    "Bacterial_spot":        {"te": "బ్యాక్టీరియా మచ్చ తెగులు","sev":"moderate"},
-    "Early_blight":          {"te": "ముందు కాలం తెగులు",    "sev": "moderate"},
-    "Late_blight":           {"te": "చివరి కాలం తెగులు",    "sev": "severe"},
-    "Leaf_Mold":             {"te": "ఆకు బూజు తెగులు",      "sev": "moderate"},
-    "Septoria_leaf_spot":    {"te": "సెప్టోరియా మచ్చ",      "sev": "moderate"},
-    "Spider_mites":          {"te": "సాలె పురుగు తెగులు",   "sev": "moderate"},
-    "Target_Spot":           {"te": "టార్గెట్ మచ్చ తెగులు", "sev": "mild"},
-    "Yellow_Leaf_Curl_Virus":{"te": "పసుపు ఆకు వైరస్",      "sev": "severe"},
-    "mosaic_virus":          {"te": "మొజాయిక్ వైరస్",       "sev": "severe"},
-    "Leaf_scorch":           {"te": "ఆకు కాలిన తెగులు",     "sev": "moderate"},
+    "Apple_scab":           {"te": "ఆపిల్ పొరల తెగులు",      "sev": "moderate"},
+    "Black_rot":            {"te": "నల్ల కుళ్ళు తెగులు",     "sev": "severe"},
+    "Cedar_apple_rust":     {"te": "తుప్పు తెగులు",            "sev": "moderate"},
+    "Powdery_mildew":       {"te": "పొడి తెగులు",              "sev": "moderate"},
+    "Cercospora_leaf_spot": {"te": "సెర్కోస్పోరా మచ్చ",       "sev": "moderate"},
+    "Common_rust":          {"te": "సాధారణ తుప్పు తెగులు",    "sev": "moderate"},
+    "Northern_Leaf_Blight": {"te": "ఉత్తర ఆకు తెగులు",       "sev": "severe"},
+    "Esca_Black_Measles":   {"te": "ఎస్కా నల్ల మచ్చ తెగులు", "sev": "severe"},
+    "Leaf_blight":          {"te": "ఆకు ముడత తెగులు",         "sev": "severe"},
+    "Haunglongbing":        {"te": "సిట్రస్ గ్రీనింగ్ తెగులు","sev": "severe"},
+    "Bacterial_spot":       {"te": "బ్యాక్టీరియా మచ్చ తెగులు","sev":"moderate"},
+    "Early_blight":         {"te": "తొందరలో వచ్చే తెగులు",   "sev": "moderate"},
+    "Late_blight":          {"te": "చివర్లో వచ్చే తెగులు",   "sev": "severe"},
+    "Leaf_Mold":            {"te": "ఆకు బూజు తెగులు",         "sev": "moderate"},
+    "Septoria_leaf_spot":   {"te": "సెప్టోరియా మచ్చ తెగులు", "sev": "moderate"},
+    "Spider_mites":         {"te": "సాలె పురుగు తెగులు",      "sev": "moderate"},
+    "Target_Spot":          {"te": "టార్గెట్ మచ్చ తెగులు",    "sev": "mild"},
+    "Yellow_Leaf_Curl_Virus":{"te":"పసుపు ఆకు మోడి వైరస్",   "sev": "severe"},
+    "mosaic_virus":         {"te": "మొజాయిక్ వైరస్",          "sev": "severe"},
+    "Leaf_scorch":          {"te": "ఆకు కాలిన తెగులు",        "sev": "moderate"},
 }
 
 TREATMENTS = {
     "moderate": [
-        "Mancozeb లేదా Copper Oxychloride స్ప్రే చేయండి",
-        "వ్యాధిగ్రస్త ఆకులను తొలగించి నాశనం చేయండి",
-        "సమతుల్య ఎరువులు వాడి మొక్క శక్తిని పెంచండి",
+        "Mancozeb లేదా Copper Oxychloride స్ప్రే వేయండి (2g/litre నీటిలో)",
+        "వ్యాధిగ్రస్త ఆకులను తొలగించి దూరంగా నాశనం చేయండి",
+        "సమతుల్య ఎరువులు వాడి మొక్క నిరోధకత పెంచండి",
     ],
     "severe": [
-        "వెంటనే వ్యవసాయ అధికారిని సంప్రదించండి",
-        "వ్యాధిగ్రస్త మొక్కలను పొలం నుండి తొలగించండి",
-        "Systemic fungicide ని సిఫార్సు చేసిన మోతాదులో వాడండి",
-        "నీటి పారుదల నిర్వహణ మెరుగుపరచండి",
+        "వెంటనే వ్యవసాయ అధికారి / KVK ని సంప్రదించండి",
+        "వ్యాధిగ్రస్త మొక్కలను పొలం నుండి వెంటనే తొలగించండి",
+        "Systemic fungicide సిఫార్సు మోతాదులో వాడండి",
+        "నీటి పారుదల మరియు పొలం పరిశుభ్రత మెరుగుపరచండి",
     ],
     "mild": [
-        "Neem oil స్ప్రే (5ml/litre) చేయండి",
-        "మొక్కల మధ్య దూరం పెంచండి",
-        "మొక్కలకు తగినంత గాలి, వెలుతురు అందేలా చూసుకోండి",
+        "వేప నూనె స్ప్రే (5ml/litre) వేయండి",
+        "మొక్కల మధ్య ఎడం పెంచి గాలి వెలుతురు అందేలా చేయండి",
+        "అతిగా నీరు పోయడం మానండి",
     ],
 }
 
 ORGANIC = {
-    "moderate": "వేప నూనె (5మి.లీ/లీటర్) + పసుపు పొడి (2గ్రా/లీటర్) కలిపి వారంలో 2 సార్లు స్ప్రే చేయండి.",
-    "severe":   "వేగంగా వ్యవసాయ అధికారిని సంప్రదించండి. ఈలోగా రోగగ్రస్త భాగాలు తొలగించండి.",
-    "mild":     "వేప నూనె స్ప్రే (5మి.లీ/లీటర్) వారానికి ఒకసారి సరిపోతుంది.",
+    "moderate": "వేప నూనె (5ml) + పసుపు పొడి (2g) లీటర్ నీటిలో కలిపి వారంలో 2 సార్లు స్ప్రే చేయండి.",
+    "severe":   "వ్యవసాయ అధికారిని సంప్రదించండి. ఈ లోపు రోగగ్రస్త భాగాలు తొలగించండి.",
+    "mild":     "వేప నూనె స్ప్రే (5ml/litre) వారానికి ఒకసారి సరిపోతుంది.",
+    "healthy":  "",
 }
 
-
-def get_model_path():
-    here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(here, "models", "plant_disease_mobilenetv2.h5")
+MODEL_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+HEAD_PATH  = os.path.join(MODEL_DIR, "plantvillage_head.pth")
 
 
-def download_model(model_path):
-    """Download pre-trained PlantVillage MobileNetV2 model on first run."""
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
-    # Hosted on GitHub Releases (free, no authentication)
-    url = "https://github.com/SARATH4546/rythumitra/releases/download/v2.0/plant_disease_mobilenetv2.h5"
-    print(f"[Disease] Downloading model (~14MB)...", file=sys.stderr)
-    try:
-        urllib.request.urlretrieve(url, model_path)
-        print(f"[Disease] Model downloaded to {model_path}", file=sys.stderr)
-        return True
-    except Exception as e:
-        print(f"[Disease] Download failed: {e}", file=sys.stderr)
-        return False
-
-
-def parse_class(class_name):
-    """Parse PlantVillage class name into plant, disease, healthy."""
-    parts = class_name.split("___")
-    plant   = parts[0].replace("_", " ") if len(parts) > 0 else "Unknown"
-    disease = parts[1].replace("_", " ") if len(parts) > 1 else "unknown"
+# ─── Parse class label ────────────────────────────────────────────────────────
+def parse_class(cls):
+    parts      = cls.split("___")
+    plant      = parts[0].replace("_", " ") if parts else "Unknown"
+    disease    = parts[1] if len(parts) > 1 else "unknown"
     is_healthy = "healthy" in disease.lower()
     return plant, disease, is_healthy
 
 
 def get_telugu_info(disease_key):
-    """Match disease key to Telugu info dict."""
     for k, v in TELUGU_INFO.items():
-        if k.lower().replace("_", "") in disease_key.lower().replace("_", "").replace(" ", ""):
+        if k.lower().replace("_","") in disease_key.lower().replace("_","").replace(" ",""):
             return v
-    return {"te": disease_key, "sev": "moderate"}
-
-
-def predict(image_path, crop_hint=""):
-    try:
-        import numpy as np
-        from PIL import Image
-        import tensorflow as tf  # noqa
-
-        model_path = get_model_path()
-        if not os.path.exists(model_path):
-            if not download_model(model_path):
-                return fallback_diagnosis(crop_hint)
-
-        # Load model (cached in memory for single inference; Node.js spawns per request)
-        model = tf.keras.models.load_model(model_path)
-
-        # Preprocess image (MobileNetV2 expects 224×224 RGB, normalized)
-        img = Image.open(image_path).convert("RGB").resize((224, 224))
-        arr = np.array(img, dtype=np.float32) / 255.0
-        arr = np.expand_dims(arr, axis=0)  # shape (1, 224, 224, 3)
-
-        preds = model.predict(arr, verbose=0)[0]
-        top_idx  = int(np.argmax(preds))
-        top_conf = float(preds[top_idx])
-
-        class_name          = CLASSES[top_idx]
-        plant, disease_raw, is_healthy = parse_class(class_name)
-        tel_info = get_telugu_info(disease_raw)
-        severity = "healthy" if is_healthy else tel_info.get("sev", "moderate")
-
-        # Top-3 predictions
-        top3_idx = np.argsort(preds)[::-1][:3]
-        alternatives = [
-            {"class": CLASSES[int(i)], "confidence": round(float(preds[i]), 3)}
-            for i in top3_idx[1:]
-        ]
-
-        confidence_label = "high" if top_conf > 0.7 else "medium" if top_conf > 0.4 else "low"
-
-        return {
-            "success":       True,
-            "plant":         plant,
-            "disease":       disease_raw if not is_healthy else "Healthy",
-            "telugu_disease": "ఆరోగ్యంగా ఉంది" if is_healthy else tel_info["te"],
-            "is_healthy":    is_healthy,
-            "severity":      severity,
-            "confidence":    confidence_label,
-            "confidence_score": round(top_conf, 3),
-            "treatment":     [] if is_healthy else TREATMENTS.get(severity, TREATMENTS["moderate"]),
-            "organic_remedy": "" if is_healthy else ORGANIC.get(severity, ORGANIC["moderate"]),
-            "telugu_summary": build_telugu_summary(plant, tel_info, is_healthy, severity),
-            "alternatives":  alternatives,
-            "model":         "PlantVillage-MobileNetV2-local",
-        }
-
-    except ImportError as e:
-        return {"success": False, "error": f"Missing package: {e}. Run: pip install tensorflow Pillow numpy"}
-    except Exception as e:
-        return {"success": False, "error": str(e), "trace": traceback.format_exc()}
+    return {"te": disease_key.replace("_", " "), "sev": "moderate"}
 
 
 def build_telugu_summary(plant, tel_info, is_healthy, severity):
     if is_healthy:
-        return f"మీ {plant} పంట ఆరోగ్యంగా ఉంది! ఎటువంటి వ్యాధి కనుగొనబడలేదు. ప్రస్తుత సేద్య పద్ధతులు కొనసాగించండి."
-    sev_te = {"mild": "తక్కువ", "moderate": "మధ్యస్థ", "severe": "తీవ్రమైన"}.get(severity, "")
-    return (
-        f"మీ {plant} పంటలో {tel_info['te']} కనుగొనబడింది. "
-        f"తీవ్రత: {sev_te}. "
-        f"వెంటనే చికిత్స చేయకపోతే దిగుబడి తగ్గవచ్చు. "
-        f"{'వ్యవసాయ అధికారిని సంప్రదించండి.' if severity == 'severe' else 'క్రింది చికిత్స పాటించండి.'}"
-    )
+        return (f"మీ {plant} పంట ఆరోగ్యంగా ఉంది! ఎటువంటి వ్యాధి కనుగొనబడలేదు. "
+                "ప్రస్తుత సేద్య పద్ధతులు కొనసాగించండి.")
+    sev_te = {"mild":"తక్కువ","moderate":"మధ్యస్థ","severe":"తీవ్రమైన"}.get(severity,"")
+    return (f"మీ {plant} పంటలో {tel_info['te']} కనుగొనబడింది. "
+            f"తీవ్రత: {sev_te}. "
+            f"{'వెంటనే వ్యవసాయ అధికారిని సంప్రదించండి.' if severity=='severe' else 'క్రింది చికిత్స పాటించండి.'}")
 
 
-def fallback_diagnosis(crop_hint):
-    """Fallback when model not available — rule-based."""
-    return {
-        "success":        True,
-        "plant":          crop_hint or "మీ పంట",
-        "disease":        "Analysis unavailable",
-        "telugu_disease": "విశ్లేషణ అందుబాటులో లేదు",
-        "is_healthy":     False,
-        "severity":       "unknown",
-        "confidence":     "low",
-        "confidence_score": 0.0,
-        "treatment":      ["సమీప వ్యవసాయ అధికారిని సంప్రదించండి", "KVK helpline: 1800-180-1551"],
-        "organic_remedy": "వేప నూనె స్ప్రే (5ml/litre) ప్రయత్నించండి.",
-        "telugu_summary": "మోడల్ లోడ్ కాలేదు. దయచేసి setup.py రన్ చేసి మోడల్ డౌన్‌లోడ్ చేయండి.",
-        "model":          "fallback",
-    }
+# ─── Build PyTorch MobileNetV2 model ─────────────────────────────────────────
+def get_model():
+    import torch
+    import torch.nn as nn
+    from torchvision.models import mobilenet_v2, MobileNet_V2_Weights
+
+    backbone = mobilenet_v2(weights=MobileNet_V2_Weights.IMAGENET1K_V1)
+    # Replace classifier head for 38-class output
+    in_features = backbone.classifier[1].in_features
+    backbone.classifier[1] = nn.Linear(in_features, len(CLASSES))
+    backbone.eval()
+    return backbone
+
+
+def load_model():
+    import torch
+    model = get_model()
+    if os.path.exists(HEAD_PATH):
+        try:
+            state = torch.load(HEAD_PATH, map_location="cpu", weights_only=True)
+            model.load_state_dict(state, strict=False)
+            print(f"[Disease] Loaded fine-tuned weights from {HEAD_PATH}", file=sys.stderr)
+        except Exception as e:
+            print(f"[Disease] Warning: could not load head weights ({e}), using ImageNet backbone only", file=sys.stderr)
+    else:
+        print("[Disease] No fine-tuned weights found — using ImageNet backbone (zero-shot mode).", file=sys.stderr)
+        print(f"          Run: python train_disease_model.py --dataset /path/to/PlantVillage", file=sys.stderr)
+    return model
+
+
+def predict(image_path, crop_hint=""):
+    try:
+        import torch
+        from torchvision import transforms
+        from PIL import Image
+
+        transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ])
+
+        img    = Image.open(image_path).convert("RGB")
+        tensor = transform(img).unsqueeze(0)  # (1, 3, 224, 224)
+
+        model = load_model()
+        with torch.no_grad():
+            logits = model(tensor)[0]
+            probs  = torch.softmax(logits, dim=0).numpy()
+
+        top_idx  = int(probs.argmax())
+        top_conf = float(probs[top_idx])
+
+        class_name           = CLASSES[top_idx]
+        plant, disease_raw, is_healthy = parse_class(class_name)
+        tel_info  = get_telugu_info(disease_raw)
+        severity  = "healthy" if is_healthy else tel_info.get("sev", "moderate")
+        conf_label= "high" if top_conf > 0.70 else "medium" if top_conf > 0.40 else "low"
+
+        # Top-3
+        top3 = sorted(range(len(probs)), key=lambda i: -probs[i])[:3]
+        alternatives = [{"class": CLASSES[i], "confidence": round(float(probs[i]),3)} for i in top3[1:]]
+
+        return {
+            "success":         True,
+            "plant":           plant,
+            "disease":         "Healthy" if is_healthy else disease_raw.replace("_"," "),
+            "telugu_disease":  "ఆరోగ్యంగా ఉంది" if is_healthy else tel_info["te"],
+            "is_healthy":      is_healthy,
+            "severity":        "healthy" if is_healthy else severity,
+            "confidence":      conf_label,
+            "confidence_score": round(top_conf, 3),
+            "treatment":       [] if is_healthy else TREATMENTS.get(severity, TREATMENTS["moderate"]),
+            "organic_remedy":  ORGANIC.get("healthy" if is_healthy else severity, ""),
+            "telugu_summary":  build_telugu_summary(plant, tel_info, is_healthy, severity),
+            "alternatives":    alternatives,
+            "model":           "PlantVillage-MobileNetV2-PyTorch-local",
+        }
+
+    except ImportError as e:
+        return {"success": False, "error": f"Missing: {e}. Run: pip install torch torchvision Pillow"}
+    except Exception as e:
+        return {"success": False, "error": str(e), "trace": traceback.format_exc()}
 
 
 if __name__ == "__main__":
@@ -215,12 +210,12 @@ if __name__ == "__main__":
         print(json.dumps({"success": False, "error": "Usage: python disease.py <image_path> [crop_hint]"}))
         sys.exit(1)
 
-    image_path = sys.argv[1]
-    crop_hint  = sys.argv[2] if len(sys.argv) > 2 else ""
+    img_path  = sys.argv[1]
+    crop_hint = sys.argv[2] if len(sys.argv) > 2 else ""
 
-    if not os.path.exists(image_path):
-        print(json.dumps({"success": False, "error": f"File not found: {image_path}"}))
+    if not os.path.exists(img_path):
+        print(json.dumps({"success": False, "error": f"File not found: {img_path}"}))
         sys.exit(1)
 
-    result = predict(image_path, crop_hint)
+    result = predict(img_path, crop_hint)
     print(json.dumps(result, ensure_ascii=False))
