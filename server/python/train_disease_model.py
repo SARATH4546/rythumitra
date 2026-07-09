@@ -115,7 +115,19 @@ def train(dataset_path):
 
     print(f"\n[Train] Done. Best val accuracy: {best_acc:.3f}")
     print(f"[Train] Model saved to: {HEAD_PATH}")
+
+    # Save class labels for dynamic loading by disease.py
+    labels_info = {}
+    for idx, cls in enumerate(full_ds.classes):
+        labels_info[cls] = {"index": idx, "class": cls, "te": cls, "crop": cls.split("___")[0] if "___" in cls else cls, "sev": "moderate"}
+    import json as _json
+    labels_path = os.path.join(MODEL_DIR, "class_labels.json")
+    with open(labels_path, "w", encoding="utf-8") as f:
+        _json.dump(labels_info, f, ensure_ascii=False, indent=2)
+    print(f"[Train] Class labels saved: {labels_path}")
+
     return HEAD_PATH
+
 
 
 def test_model_structure():
