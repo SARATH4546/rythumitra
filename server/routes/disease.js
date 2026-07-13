@@ -40,14 +40,17 @@ router.get('/stats', async (req, res) => {
     // By district
     const byDistrict = {};
     // By severity
-    const bySeverity = { mild: 0, moderate: 0, severe: 0, unknown: 0 };
+    const bySeverity = { healthy: 0, mild: 0, moderate: 0, severe: 0, unknown: 0 };
 
     for (const d of all) {
-      byCrop[d.crop || 'Unknown']         = (byCrop[d.crop || 'Unknown'] || 0) + 1;
-      byDisease[d.disease || 'Unknown']   = (byDisease[d.disease || 'Unknown'] || 0) + 1;
-      byDistrict[d.district || 'Unknown'] = (byDistrict[d.district || 'Unknown'] || 0) + 1;
-      bySeverity[d.severity || 'unknown'] = (bySeverity[d.severity || 'unknown'] || 0) + 1;
+      const cropKey = d.plant || d.crop || 'Unknown';
+      byCrop[cropKey]                           = (byCrop[cropKey] || 0) + 1;
+      byDisease[d.disease || 'Unknown']         = (byDisease[d.disease || 'Unknown'] || 0) + 1;
+      byDistrict[d.district || 'Unknown']       = (byDistrict[d.district || 'Unknown'] || 0) + 1;
+      const sev = d.is_healthy ? 'healthy' : (d.severity || 'unknown');
+      bySeverity[sev] = (bySeverity[sev] || 0) + 1;
     }
+
 
     // Top 5 diseases
     const topDiseases = Object.entries(byDisease)

@@ -93,16 +93,16 @@ export default function DiseaseDetection() {
       </div>
 
       {/* AI Status Banner */}
-      <div style={{ background:'rgba(59,130,246,0.08)', border:'1px solid rgba(59,130,246,0.2)', borderRadius:12, padding:'12px 20px', display:'flex', alignItems:'center', gap:12 }}>
+      <div style={{ background:'rgba(34,197,94,0.06)', border:'1px solid rgba(34,197,94,0.25)', borderRadius:12, padding:'12px 20px', display:'flex', alignItems:'center', gap:12 }}>
         <div style={{ fontSize:20 }}>🤖</div>
         <div>
           <div style={{ fontWeight:700, fontSize:13, color:'var(--text-primary)' }}>AI Services Active</div>
           <div style={{ fontSize:12, color:'var(--text-secondary)' }}>
-            📸 Gemini Vision (disease) · 🎤 Groq Whisper (voice) · 🗣️ Google TTS (Telugu voice replies) · All free tier
+            🔬 MobileNetV2 PlantVillage (disease) · 🎤 Vakyansh Wav2Vec2 Telugu STT · 🗣️ edge-TTS (Telugu voice) · 100% Local
           </div>
         </div>
         <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
-          {[['Gemini','#22c55e'],['Groq','#8b5cf6'],['TTS','#f59e0b']].map(([n,c]) => (
+          {[['MobileNetV2','#22c55e'],['Vakyansh','#8b5cf6'],['edge-TTS','#f59e0b']].map(([n,c]) => (
             <span key={n} style={{ fontSize:11, fontWeight:700, padding:'3px 10px', borderRadius:20, background:`${c}20`, color:c, border:`1px solid ${c}40` }}>{n} ✓</span>
           ))}
         </div>
@@ -113,7 +113,7 @@ export default function DiseaseDetection() {
         <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:16 }}>
           <STAT_CARD icon={Bug}          label="Total Detections"   value={stats.total}                             color="#ef4444" />
           <STAT_CARD icon={AlertTriangle} label="Severe Cases"      value={stats.bySeverity?.severe || 0}           color="#f97316" sub="Needs immediate attention" />
-          <STAT_CARD icon={CheckCircle}  label="Healthy Reports"    value={stats.bySeverity?.unknown || 0}          color="#22c55e" sub="No disease found" />
+          <STAT_CARD icon={CheckCircle}  label="Healthy Reports"    value={stats.bySeverity?.healthy || 0}          color="#22c55e" sub="No disease found" />
           <STAT_CARD icon={TrendingUp}   label="Top Disease"        value={stats.topDiseases?.[0]?.name || '—'}     color="#8b5cf6" sub={stats.topDiseases?.[0] ? `${stats.topDiseases[0].count} cases` : ''} />
         </div>
       )}
@@ -190,8 +190,8 @@ export default function DiseaseDetection() {
               <div key={d.id} className="card" style={{ border: d.is_healthy ? '1px solid rgba(34,197,94,0.3)' : `1px solid ${sev.border}`, background: d.is_healthy ? 'rgba(34,197,94,0.05)' : sev.bg }}>
                 <div style={{ display:'flex', gap:16, alignItems:'flex-start' }}>
                   {/* Image thumbnail */}
-                  {d.media_url ? (
-                    <img src={d.media_url} alt="crop" style={{ width:80, height:80, objectFit:'cover', borderRadius:8, flexShrink:0, border:'1px solid var(--border)' }} onError={e => { e.target.style.display='none' }}/>
+                  {d.image_url ? (
+                    <img src={d.image_url} alt="crop" style={{ width:80, height:80, objectFit:'cover', borderRadius:8, flexShrink:0, border:'1px solid var(--border)' }} onError={e => { e.target.style.display='none' }}/>
                   ) : (
                     <div style={{ width:80, height:80, borderRadius:8, background:'var(--bg-secondary)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:32 }}>🌿</div>
                   )}
@@ -206,12 +206,12 @@ export default function DiseaseDetection() {
                     </div>
 
                     <div style={{ display:'flex', gap:16, fontSize:12, color:'var(--text-secondary)', marginBottom:8, flexWrap:'wrap' }}>
-                      <span>👤 {d.farmer_name}</span>
-                      <span><MapPin size={11}/> {d.district}</span>
-                      <span>🌾 {d.crop}</span>
+                      <span>👤 {d.farmer_name || d.mobile || '—'}</span>
+                      <span><MapPin size={11}/> {d.district || '—'}</span>
+                      <span>🌾 {d.plant || d.crop || '—'}</span>
                       <span><Clock size={11}/> {new Date(d.detected_at).toLocaleString('en-IN')}</span>
-                      <span style={{ color: d.confidence==='high'?'#22c55e':d.confidence==='medium'?'#f59e0b':'#94a3b8', fontWeight:600 }}>
-                        {d.confidence} confidence
+                      <span style={{ color: d.confidence >= 0.8 ? '#22c55e' : d.confidence >= 0.6 ? '#f59e0b' : '#94a3b8', fontWeight:600 }}>
+                        {d.confidence ? `${Math.round(d.confidence * 100)}%` : '—'} confidence
                       </span>
                     </div>
 
@@ -254,15 +254,15 @@ export default function DiseaseDetection() {
               <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
             </div>
             <div style={{ padding:'0 24px 24px', display:'flex', flexDirection:'column', gap:14 }}>
-              {selected.media_url && <img src={selected.media_url} alt="crop" style={{ width:'100%', maxHeight:220, objectFit:'cover', borderRadius:10 }}/>}
+              {selected.image_url && <img src={selected.image_url} alt="crop" style={{ width:'100%', maxHeight:220, objectFit:'cover', borderRadius:10 }}/>}
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
                 {[
-                  ['Disease', selected.telugu_disease || selected.disease],
+                  ['Disease', selected.disease],
                   ['Severity', (SEVERITY_COLOR[selected.severity]||SEVERITY_COLOR.unknown).label],
-                  ['Farmer', selected.farmer_name],
-                  ['District', selected.district],
-                  ['Crop', selected.crop],
-                  ['Confidence', selected.confidence],
+                  ['Farmer', selected.farmer_name || selected.mobile || '—'],
+                  ['District', selected.district || '—'],
+                  ['Crop', selected.plant || selected.crop || '—'],
+                  ['Confidence', selected.confidence ? `${Math.round(selected.confidence * 100)}%` : '—'],
                   ['Detected', new Date(selected.detected_at).toLocaleString('en-IN')],
                   ['Verified', selected.verified ? '✅ Yes' : '❌ No'],
                 ].map(([k, v]) => (

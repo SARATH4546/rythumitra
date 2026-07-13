@@ -17,10 +17,11 @@ import os, sys, json
 
 MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 HEAD_PATH = os.path.join(MODEL_DIR, "plantvillage_head.pth")
-NUM_CLASSES = 38
+NUM_CLASSES = 56
 IMG_SIZE    = 224
 BATCH_SIZE  = 32
 EPOCHS      = 10
+NUM_WORKERS = 0   # Must be 0 on Windows to avoid multiprocessing errors
 
 
 def train(dataset_path):
@@ -29,6 +30,23 @@ def train(dataset_path):
     from torch.utils.data import DataLoader, random_split
     from torchvision import datasets, transforms, models
     from torchvision.models import mobilenet_v2, MobileNet_V2_Weights
+    from PIL import Image, UnidentifiedImageError
+
+    # ── Safe dataset: skips corrupt/unreadable images ─────────────────────────
+    class SafeImageFolder(datasets.ImageFolder):
+        def __getitem__(self, index):
+            try:
+                return super().__getitem__(index)
+            except (UnidentifiedImageError, OSError, Exception):
+                # Return None for corrupt images — filtered by collate_fn
+                return None
+
+    def safe_collate(batch):
+        """Filter out None items from corrupt images."""
+        batch = [b for b in batch if b is not None]
+        if not batch:
+            return None
+        return torch.utils.data.dataloader.default_collate(batch)
 
     os.makedirs(MODEL_DIR, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -49,17 +67,36 @@ def train(dataset_path):
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
     ])
 
-    full_ds = datasets.ImageFolder(dataset_path, transform=train_tf)
+    full_ds = SafeImageFolder(dataset_path, transform=train_tf)
     n_val   = int(0.2 * len(full_ds))
     n_train = len(full_ds) - n_val
     train_ds, val_ds = random_split(full_ds, [n_train, n_val])
     val_ds.dataset.transform = val_tf
 
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,  num_workers=2)
-    val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,
+                              num_workers=NUM_WORKERS, collate_fn=safe_collate)
+    val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False,
+                              num_workers=NUM_WORKERS, collate_fn=safe_collate)
 
-    print(f"[Train] Dataset: {len(full_ds)} images, {len(full_ds.classes)} classes")
-    print(f"[Train] Train: {n_train}  Val: {n_val}")
+    print(f"[Train] Dataset: {len(full_ds):,} images, {len(full_ds.classes)} classes")
+    print(f"[Train] Train: {n_train:,}  Val: {n_val:,}")
+
+    # Save class labels NOW before training (so partial training is still usable)
+    labels_info = {}
+    for idx, cls in enumerate(full_ds.classes):
+        labels_info[cls] = {
+            "index": idx, "class": cls,
+            "te": cls,
+            "crop": cls.split("___")[0] if "___" in cls else cls.split("_")[0],
+            "sev": "moderate"
+        }
+    labels_path = os.path.join(MODEL_DIR, "class_labels.json")
+    with open(labels_path, "w", encoding="utf-8") as f:
+        import json as _json
+        _json.dump(labels_info, f, ensure_ascii=False, indent=2)
+    print(f"[Train] Class labels pre-saved: {labels_path}")
+    print(f"[Train] Classes: {list(full_ds.classes)[:5]} ...")
+    sys.stdout.flush()
 
     # Load backbone with ImageNet weights, freeze it
     model = mobilenet_v2(weights=MobileNet_V2_Weights.IMAGENET1K_V1)
@@ -76,11 +113,14 @@ def train(dataset_path):
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.5)
 
     best_acc = 0.0
+    total_batches = len(train_loader)
     for epoch in range(EPOCHS):
         # ── Train phase ──────────────────────────────────────────────────────
         model.train()
         train_loss = train_correct = train_total = 0
-        for imgs, labels in train_loader:
+        for batch_idx, batch in enumerate(train_loader):
+            if batch is None: continue  # skip corrupt-image batches
+            imgs, labels = batch
             imgs, labels = imgs.to(device), labels.to(device)
             optimizer.zero_grad()
             out  = model(imgs)
@@ -90,12 +130,25 @@ def train(dataset_path):
             train_loss    += loss.item() * imgs.size(0)
             train_correct += (out.argmax(1) == labels).sum().item()
             train_total   += imgs.size(0)
+            # Print progress every 50 batches
+            if (batch_idx + 1) % 50 == 0 or (batch_idx + 1) == total_batches:
+                acc = train_correct / train_total
+                print(f"  Epoch {epoch+1} batch {batch_idx+1}/{total_batches}  acc={acc:.3f}  loss={train_loss/train_total:.4f}")
+                sys.stdout.flush()
+            # Save mid-epoch checkpoint every 500 batches (survives server restarts)
+            if (batch_idx + 1) % 500 == 0:
+                mid_ckpt = os.path.join(MODEL_DIR, "mid_epoch_checkpoint.pth")
+                torch.save(model.state_dict(), mid_ckpt)
+                print(f"  [MidCkpt] Saved at batch {batch_idx+1} -> {mid_ckpt}")
+                sys.stdout.flush()
 
         # ── Val phase ────────────────────────────────────────────────────────
         model.eval()
         val_correct = val_total = 0
         with torch.no_grad():
-            for imgs, labels in val_loader:
+            for batch in val_loader:
+                if batch is None: continue  # skip corrupt-image batches
+                imgs, labels = batch
                 imgs, labels = imgs.to(device), labels.to(device)
                 out = model(imgs)
                 val_correct += (out.argmax(1) == labels).sum().item()
@@ -107,11 +160,17 @@ def train(dataset_path):
 
         print(f"[Epoch {epoch+1}/{EPOCHS}] train_acc={train_acc:.3f}  val_acc={val_acc:.3f}  "
               f"lr={scheduler.get_last_lr()[0]:.5f}")
+        sys.stdout.flush()
+
+        # Always save latest checkpoint
+        ckpt_path = os.path.join(MODEL_DIR, f"checkpoint_epoch{epoch+1}.pth")
+        torch.save(model.state_dict(), ckpt_path)
 
         if val_acc > best_acc:
             best_acc = val_acc
             torch.save(model.state_dict(), HEAD_PATH)
-            print(f"  ✅ Best model saved (val_acc={val_acc:.3f})")
+            print(f"  ✅ Best model saved -> {HEAD_PATH}  (val_acc={val_acc:.3f})")
+            sys.stdout.flush()
 
     print(f"\n[Train] Done. Best val accuracy: {best_acc:.3f}")
     print(f"[Train] Model saved to: {HEAD_PATH}")
