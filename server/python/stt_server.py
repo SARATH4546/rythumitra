@@ -113,16 +113,17 @@ NLP_TEMPLATES = {
         "bank credit information",
     ],
     'disease_hint': [
-        "పంట ఆకు పచ్చగా లేదు",
+        # User saying THEIR crop is sick / asking to detect from photo
         "పంటకు రోగం వచ్చింది",
+        "పంట ఆకు పచ్చగా లేదు",
         "చీడపురుగులు ఉన్నాయి",
         "పంట ఎండిపోతుంది",
         "ఆకులు పసుపు రంగులోకి మారాయి",
-        "పంటకు సమస్య ఉంది",
-        "మొక్కలు చనిపోతున్నాయి",
         "ఫోటో పంపి రోగం చెప్పు",
-        "crop disease problem",
-        "plant sick yellow leaves",
+        "my crop has disease please check",
+        "send photo for disease detection",
+        "plant leaves turning yellow",
+        "crop is dying help me",
     ],
     'greeting': [
         "నమస్కారం",
@@ -131,7 +132,6 @@ NLP_TEMPLATES = {
         "నమస్తే",
         "మీరు ఎవరు",
         "ఏమి చేయగలరు",
-        "help కావాలి",
         "hello",
         "hi there",
         "start",
@@ -160,8 +160,11 @@ except Exception as e:
 
 
 # ─── 3. NLP intent classification ─────────────────────────────────────────────
-def nlp_classify(text: str, threshold: float = 0.28):
-    """Return (intent, confidence) using semantic similarity."""
+def nlp_classify(text: str, threshold: float = 0.65):
+    """Return (intent, confidence) using semantic similarity.
+    Threshold raised to 0.65 to prevent weak/false intent matches.
+    Anything below threshold goes to 'unknown' → RAG handles it.
+    """
     if NLP_MODEL is None or NLP_EMBEDDINGS is None:
         return keyword_classify(text), 0.0
 
@@ -174,6 +177,7 @@ def nlp_classify(text: str, threshold: float = 0.28):
         best_idx   = int(torch.argmax(scores))
         best_score = float(scores[best_idx])
 
+        # Require strong confidence; weak matches go to RAG
         intent = NLP_LABELS[best_idx] if best_score >= threshold else 'unknown'
         return intent, round(best_score, 3)
     except Exception:

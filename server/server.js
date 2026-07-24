@@ -45,8 +45,10 @@ const { spawn }   = require('child_process');
 const PYTHON_DIR  = path.join(__dirname, 'python');
 
 function spawnPyServer(script, name, port) {
+  const ollamaDir  = `${process.env.LOCALAPPDATA}\\Programs\\Ollama`;
+  const extraPath  = `${ollamaDir};${process.env.PATH}`;
   const proc = spawn('python', [path.join(PYTHON_DIR, script)], {
-    env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+    env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', PATH: extraPath },
     cwd: path.join(__dirname, '..'),
   });
   proc.stdout.on('data', d => process.stdout.write(`[${name}] ${d}`));
@@ -63,6 +65,32 @@ function spawnPyServer(script, name, port) {
 
 spawnPyServer('stt_server.py',     'STT',     5001);
 spawnPyServer('disease_server.py', 'Disease', 5002);
+spawnPyServer('rag_server.py',     'RAG',     5003);
+
+// ── Auto-managed ngrok tunnel ─────────────────────────────────────────────────
+const NGROK_DOMAIN = process.env.NGROK_DOMAIN || 'wobble-colt-length.ngrok-free.dev';
+function startNgrok() {
+  const args = NGROK_DOMAIN
+    ? ['http', `--url=${NGROK_DOMAIN}`, String(PORT)]
+    : ['http', String(PORT)];
+  const ng = spawn('ngrok', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  ng.stdout.on('data', d => {
+    const s = d.toString().trim();
+    if (s) console.log(`[ngrok] ${s}`);
+  });
+  ng.stderr.on('data', d => {
+    const s = d.toString().trim();
+    if (s && !s.includes('deprecated')) console.log(`[ngrok] ${s}`);
+  });
+  ng.on('close', code => {
+    console.log(`[ngrok] tunnel closed (code ${code}), restarting in 3s...`);
+    setTimeout(startNgrok, 3000);
+  });
+  console.log(`[ngrok] tunnel → https://${NGROK_DOMAIN}/api/whatsapp`);
+  return ng;
+}
+startNgrok();
+
 
 // ── Boot: init DB → start listening ──────────────────────────────────────────
 initDb().then(() => {
